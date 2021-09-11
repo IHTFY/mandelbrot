@@ -18,10 +18,9 @@ let imageData = ctx.createImageData(w, h);
 function palette(i, max) {
   const proportion = i / max;
   return [
-    (proportion - 0.6) / 0.2,
-    (2 - (Math.abs(proportion - 0.6) / 0.2)),
-    (1.5 - (Math.abs(proportion - 0.3) / 0.2)),
-    255
+    (proportion - 0.6) * 5,
+    (2 - (Math.abs(proportion - 0.6) * 5)),
+    (1.5 - (Math.abs(proportion - 0.3) * 5))
   ].map(i => Math.max(Math.min(i * 255, 255), 0));
 }
 
@@ -31,7 +30,7 @@ function plot(imageData, p, i, imax) {
   imageData.data[p * 4 + 0] = color[0];
   imageData.data[p * 4 + 1] = color[1];
   imageData.data[p * 4 + 2] = color[2];
-  imageData.data[p * 4 + 3] = color[3];
+  imageData.data[p * 4 + 3] = 255;
 }
 
 // current view range
@@ -50,8 +49,8 @@ function update() {
     let y = 0;
     let iter = 0;
     let imax = 100;
-    while (x ** 2 + y ** 2 <= 4 && iter++ < imax) {
-      [x, y] = [x ** 2 - y ** 2 + x0, 2 * x * y + y0];
+    while (x * x + y * y <= 4 && iter++ < imax) {
+      [x, y] = [x * x - y * y + x0, 2 * x * y + y0];
     }
     plot(imageData, p, iter, imax);
   }
