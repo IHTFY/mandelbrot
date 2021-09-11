@@ -1,14 +1,23 @@
 const canvas = document.getElementById('canvas');
-const w = 1500;
-const h = 800;
+const ctx = canvas.getContext('2d');
+if (window.innerWidth / window.innerHeight > 1.75) {
+  // wide screen, fill height
+  ctx.canvas.height = window.innerHeight;
+  ctx.canvas.width = 1.75 * window.innerHeight;
+} else {
+  // narrow screen, fill width
+  ctx.canvas.width = window.innerWidth;
+  ctx.canvas.height = window.innerWidth / 1.75;
+};
+const w = ctx.canvas.width;
+const h = ctx.canvas.height;
+
+let imageData = ctx.createImageData(w, h);
 
 let xmin = -2.5;
 let xmax = 1;
 let ymin = -1;
 let ymax = 1;
-
-const ctx = canvas.getContext('2d');
-let imageData = ctx.createImageData(w, h);
 
 for (let p = 0; p < w * h; p++) {
   const x0 = ((p % w) / w) * (xmax - xmin) + xmin;
