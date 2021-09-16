@@ -41,6 +41,7 @@ let ymax = 1.4;
 // center (-0.75, 0), x+-1.75, y+-1.4
 
 function update() {
+  console.log(xmin, xmax, ymin, ymax);
   // for each pixel, find number of iterations to diverge
   for (let p = 0; p < w * h; p++) {
     const x0 = ((p % w) / w) * (xmax - xmin) + xmin;
@@ -67,9 +68,13 @@ canvas.addEventListener('click', e => {
   const rect = canvas.getBoundingClientRect();
   const cx = ((e.clientX - rect.left) / w) * (xmax - xmin) + xmin;
   const cy = ((e.clientY - rect.top) / h) * (ymax - ymin) + ymin;
-  xmin = cx - (xmax - xmin) / 4;
-  xmax = cx + (xmax - xmin) / 4;
-  ymin = cy - (ymax - ymin) / 4;
-  ymax = cy + (ymax - ymin) / 4;
+  setView(cx, cy, (xmax - xmin) / 2, (ymax - ymin) / 2);
   update();
 });
+
+function setView(cx, cy, xrange, yrange) {
+  xmin = cx - xrange / 2;
+  xmax = cx + xrange / 2;
+  ymin = cy - yrange / 2;
+  ymax = cy + yrange / 2;
+}
