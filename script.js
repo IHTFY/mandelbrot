@@ -41,11 +41,8 @@ function hslToRgb(h, s, l) {
 }
 
 // returns a color based on a 1D color scale
-function palette(i, max) {
-  const proportion = i / max;
-  const cycles = 4;
-  const offset = 0.08;
-  return hslToRgb(((proportion * cycles) + offset) % 1, 1, 0.5);
+function palette(i) {
+  return hslToRgb((i + 200) / 360 % 1, 1, 0.5);
 
   // let proportion = i / max;
   // proportion = (4 * proportion) % max;
