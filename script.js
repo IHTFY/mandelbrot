@@ -41,8 +41,7 @@ let ymax = 1.4;
 // center (-0.75, 0), x+-1.75, y+-1.4
 
 function update() {
-  console.log(xmin, xmax, ymin, ymax);
-  // for each pixel, find number of iterations to diverge
+  // for each pixel, find number of iterations to diverge from the r=2 circle
   for (let p = 0; p < w * h; p++) {
     const x0 = ((p % w) / w) * (xmax - xmin) + xmin;
     const y0 = (Math.floor(p / w) / h) * (ymax - ymin) + ymin;
@@ -50,7 +49,7 @@ function update() {
     let y = 0;
     let iter = 0;
     let imax = 100;
-    while (x * x + y * y <= 4 && iter++ < imax) {
+    while (iter++ < imax && x * x + y * y <= 4) {
       [x, y] = [x * x - y * y + x0, 2 * x * y + y0];
     }
     plot(imageData, p, iter, imax);
@@ -66,9 +65,11 @@ update();
 // handle zooming
 canvas.addEventListener('click', e => {
   const rect = canvas.getBoundingClientRect();
-  const cx = ((e.clientX - rect.left) / w) * (xmax - xmin) + xmin;
-  const cy = ((e.clientY - rect.top) / h) * (ymax - ymin) + ymin;
-  setView(cx, cy, (xmax - xmin) / 2, (ymax - ymin) / 2);
+  const xrange = (xmax - xmin);
+  const yrange = (ymax - ymin);
+  const cx = ((e.clientX - rect.left) / w) * xrange + xmin;
+  const cy = ((e.clientY - rect.top) / h) * yrange + ymin;
+  setView(cx, cy, xrange / 2, yrange / 2);
   update();
 });
 
