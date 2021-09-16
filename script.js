@@ -42,7 +42,7 @@ function hslToRgb(h, s, l) {
 
 // returns a color based on a 1D color scale
 function palette(i) {
-  return hslToRgb((i + 200) / 360 % 1, 1, 0.5);
+  return hslToRgb((i + 130) / 250 % 1, 1, 0.5);
 
   // let proportion = i / max;
   // proportion = (4 * proportion) % max;
