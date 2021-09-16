@@ -14,14 +14,46 @@ const h = ctx.canvas.height;
 
 let imageData = ctx.createImageData(w, h);
 
+// https://gist.github.com/mjackson/5311256
+function hslToRgb(h, s, l) {
+  var r, g, b;
+
+  if (s == 0) {
+    r = g = b = l; // achromatic
+  } else {
+    var hue2rgb = function hue2rgb(p, q, t) {
+      if (t < 0) t += 1;
+      if (t > 1) t -= 1;
+      if (t < 1 / 6) return p + (q - p) * 6 * t;
+      if (t < 1 / 2) return q;
+      if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+      return p;
+    }
+
+    var q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    var p = 2 * l - q;
+    r = hue2rgb(p, q, h + 1 / 3);
+    g = hue2rgb(p, q, h);
+    b = hue2rgb(p, q, h - 1 / 3);
+  }
+
+  return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
+}
+
 // returns a color based on a 1D color scale
 function palette(i, max) {
   const proportion = i / max;
-  return [
-    (proportion - 0.6) * 5,
-    (2 - (Math.abs(proportion - 0.6) * 5)),
-    (1.5 - (Math.abs(proportion - 0.3) * 5))
-  ].map(i => Math.max(Math.min(i * 255, 255), 0));
+  const cycles = 4;
+  const offset = 0.08;
+  return hslToRgb(((proportion * cycles) + offset) % 1, 1, 0.5);
+
+  // let proportion = i / max;
+  // proportion = (4 * proportion) % max;
+  // return [
+  //   (proportion - 0.6) * 5,
+  //   (2 - (Math.abs(proportion - 0.6) * 5)),
+  //   (1.5 - (Math.abs(proportion - 0.3) * 5))
+  // ].map(i => Math.max(Math.min(i * 255, 255), 0));
 }
 
 // sets color of a pixel
@@ -33,26 +65,68 @@ function plot(imageData, p, i, imax) {
   imageData.data[p * 4 + 3] = 255;
 }
 
+let highPrecision = false;
+
 // current view range
-let xmin = -2.5;
-let xmax = 1;
-let ymin = -1.4;
-let ymax = 1.4;
+let xmin = Big(-2.5);
+let xmax = Big(1);
+let ymin = Big(-1.4);
+let ymax = Big(1.4);
 // center (-0.75, 0), x+-1.75, y+-1.4
 
 function update() {
+  // when resolution falls below 1e-16, use high precision
+  // resolution: xrange/w || yrange/h
+
+  highPrecision = xmax.minus(xmin).div(w).lte(1e-16) || ymax.minus(ymin).div(h).lte(1e-16);
+
   // for each pixel, find number of iterations to diverge from the r=2 circle
-  for (let p = 0; p < w * h; p++) {
-    const x0 = ((p % w) / w) * (xmax - xmin) + xmin;
-    const y0 = (Math.floor(p / w) / h) * (ymax - ymin) + ymin;
-    let x = 0;
-    let y = 0;
-    let iter = 0;
-    let imax = 100;
-    while (iter++ < imax && x * x + y * y <= 4) {
-      [x, y] = [x * x - y * y + x0, 2 * x * y + y0];
+  if (highPrecision) {
+    let dp = Math.ceil(-Math.log10((xmax.minus(xmin)).div(w).toNumber())); // NOTE haphazard math
+
+    for (let p = 0; p < w * h; p++) {
+      let iter = 0;
+      let imax = 1000;
+
+      // high precision
+      const x0 = Big((p % w) / w).times(xmax.minus(xmin)).plus(xmin).round(dp, 2);
+      const y0 = Big(Math.floor(p / w) / h).times(ymax.minus(ymin)).plus(ymin).round(dp, 2);
+      let x = Big(0);
+      let y = Big(0);
+      let x2 = Big(0);
+      let y2 = Big(0);
+
+      while (iter++ < imax && x2.plus(y2).lte(4)) {
+        // console.log(p, iter);
+        x2 = x.pow(2).round(dp, 2);
+        y2 = y.pow(2).round(dp, 2);
+        [x, y] = [x2.minus(y2).plus(x0).round(dp, 2), Big(2).times(x).times(y).plus(y0).round(dp, 2)];
+      }
+
+      plot(imageData, p, iter, imax);
     }
-    plot(imageData, p, iter, imax);
+
+  } else {
+    let xn = xmin.toNumber();
+    let xx = xmax.toNumber();
+    let yn = ymin.toNumber();
+    let yx = ymax.toNumber();
+
+    for (let p = 0; p < w * h; p++) {
+      let iter = 0;
+      let imax = 1000;
+
+      const x0 = ((p % w) / w) * (xx - xn) + xn;
+      const y0 = (Math.floor(p / w) / h) * (yx - yn) + yn;
+      let x = 0;
+      let y = 0;
+
+      while (iter++ < imax && x * x + y * y <= 4) {
+        [x, y] = [x * x - y * y + x0, 2 * x * y + y0];
+      }
+
+      plot(imageData, p, iter, imax);
+    }
   }
 
   // draw
@@ -65,17 +139,17 @@ update();
 // handle zooming
 canvas.addEventListener('click', e => {
   const rect = canvas.getBoundingClientRect();
-  const xrange = (xmax - xmin);
-  const yrange = (ymax - ymin);
-  const cx = ((e.clientX - rect.left) / w) * xrange + xmin;
-  const cy = ((e.clientY - rect.top) / h) * yrange + ymin;
-  setView(cx, cy, xrange / 2, yrange / 2);
+  const xrange = Big(xmax.minus(xmin));
+  const yrange = Big(ymax.minus(ymin));
+  const cx = Big((e.clientX - rect.left) / w).times(xrange).plus(xmin);
+  const cy = Big((e.clientY - rect.top) / h).times(yrange).plus(ymin);
+  setView(cx, cy, xrange.div(4), yrange.div(4));
   update();
 });
 
 function setView(cx, cy, xrange, yrange) {
-  xmin = cx - xrange / 2;
-  xmax = cx + xrange / 2;
-  ymin = cy - yrange / 2;
-  ymax = cy + yrange / 2;
+  xmin = cx.minus(xrange.div(2));
+  xmax = xmin.plus(xrange);
+  ymin = cy.minus(yrange.div(2));
+  ymax = ymin.plus(yrange);
 }
