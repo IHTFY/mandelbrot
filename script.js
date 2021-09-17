@@ -81,11 +81,12 @@ function update() {
   if (highPrecision) {
     let dp = Math.ceil(-Math.log10((xmax.minus(xmin)).div(w).toNumber())); // NOTE haphazard math
 
+    // high precision
     for (let p = 0; p < w * h; p++) {
       let iter = 0;
       let imax = 1000;
 
-      // high precision
+      // convert pixel to view coordinates
       const x0 = Big((p % w) / w).times(xmax.minus(xmin)).plus(xmin).round(dp, 2);
       const y0 = Big(Math.floor(p / w) / h).times(ymax.minus(ymin)).plus(ymin).round(dp, 2);
       let x = Big(0);
@@ -93,6 +94,7 @@ function update() {
       let x2 = Big(0);
       let y2 = Big(0);
 
+      // iterate to find when it leaves the circle
       while (iter++ < imax && x2.plus(y2).lte(4)) {
         // console.log(p, iter);
         x2 = x.pow(2).round(dp, 2);
@@ -113,11 +115,13 @@ function update() {
       let iter = 0;
       let imax = 1000;
 
+      // convert pixel to view coordinates
       const x0 = ((p % w) / w) * (xx - xn) + xn;
       const y0 = (Math.floor(p / w) / h) * (yx - yn) + yn;
       let x = 0;
       let y = 0;
 
+      // iterate to find when it leaves the circle
       while (iter++ < imax && x * x + y * y <= 4) {
         [x, y] = [x * x - y * y + x0, 2 * x * y + y0];
       }
