@@ -42,6 +42,7 @@ function hslToRgb(h, s, l) {
 
 // returns a color based on a 1D color scale
 function palette(i) {
+  //TODO https://www.iquilezles.org/www/articles/mset_smooth/mset_smooth.htm
   const paletteLength = 250;
   const offset = 130;
   return hslToRgb((i + offset) / paletteLength % 1, 1, 0.5);
@@ -89,8 +90,9 @@ function update() {
   // when resolution falls below 1e-16, use high precision
   // resolution: xrange/w || yrange/h
 
-  highPrecision = xmax.minus(xmin).toNumber() / w <= 1e-16 || ymax.minus(ymin).toNumber() / h <= 1e-16;
-  let imax = 1500;
+  // TODO uncomment, testing...
+  // highPrecision = xmax.minus(xmin).toNumber() / w <= 1e-16 || ymax.minus(ymin).toNumber() / h <= 1e-16;
+  let imax = 1000;
 
 
   // for each pixel, find number of iterations to diverge from the r=2 circle
@@ -136,7 +138,6 @@ function update() {
      * approximate remaining pixels using perturbation
      */
 
-
     // https://mathr.co.uk/blog/2021-09-08_generalized_series_approximation.html
     //  (c, z) |--> z^2 + c
     //  (C, Z, c, z) |--> 2*Z*z + z^2 + c
@@ -153,16 +154,17 @@ function update() {
     //  0  :  a_9  :=  2*a_4*a_5 + 2*a_3*a_6 + 2*a_2*a_7 + 2*a_1*a_8 + 2*Z*a_9
 
     function coeff(x) {
-      let co = [[1, 0, 0, 0]];
-      // NOTE Use High Precision???
+      let co = [[1, 0, 0]];
+      // let co = [[1, 0, 0, 0, 0]];
       x = x.map(n => n.map(i => i.toNumber()));
       for (let n = 1; n < x.length; ++n) {
         const xn2 = ix(2, x[n - 1]);
         co[n] = [
           ia(ix(xn2, co[n - 1][0]), 1),
           ia(ix(xn2, co[n - 1][1]), ix(co[n - 1][0], co[n - 1][0])),
-          ia(ix(xn2, co[n - 1][2]), ix(2, co[n - 1][0], co[n - 1][1])),
-          ia(ix(xn2, co[n - 1][3]), ix(2, co[n - 1][0], co[n - 1][2]), ix(co[n - 1][1], co[n - 1][1]))
+          // ia(ix(xn2, co[n - 1][2]), ix(2, co[n - 1][0], co[n - 1][1])),
+          // ia(ix(xn2, co[n - 1][3]), ix(2, co[n - 1][0], co[n - 1][2]), ix(co[n - 1][1], co[n - 1][1])),
+          // ia(ix(xn2, co[n - 1][4]), ix(2, co[n - 1][0], co[n - 1][3]), ix(co[n - 1][1], co[n - 1][2]))
         ];
       }
       return co;
@@ -170,22 +172,27 @@ function update() {
 
     function delta(co, d0, n) {
       const d0_2 = ix(d0, d0);
-      const d0_3 = ix(d0_2, d0);
-      const d0_4 = ix(d0_3, d0);
+      // const d0_3 = ix(d0_2, d0);
+      // const d0_4 = ix(d0_3, d0);
+      // const d0_5 = ix(d0_4, d0);
 
       const t1 = ix(co[n][0], d0);
       const t2 = ix(co[n][1], d0_2);
-      const t3 = ix(co[n][2], d0_3);
-      const t4 = ix(co[n][3], d0_4);
-      return ia(t1, t2, t3, t4);
+      // const t3 = ix(co[n][2], d0_3);
+      // const t4 = ix(co[n][3], d0_4);
+      // const t5 = ix(co[n][4], d0_5);
+      return ia(t1, t2);
+      // return ia(t1, t2, t3);
+      // return ia(t1, t2, t3, t4, t5);
     }
 
     function getEst(x, dn, n) {
-      return ia(x[n].map(i => i.toNumber()), dn);
+      return ia([x[n][0].toNumber(), x[n][1].toNumber()], dn);
+      // return ia(x[n].map(i => i.toNumber()), dn);
     }
 
     let co = coeff(Xn);
-    console.log(Xn, co);
+    // console.log(Xn, co);
 
     // coordinate size of each pixel
     let wRes = xmax.minus(xmin).toNumber() / w;
@@ -273,10 +280,17 @@ function ix() {
     if (typeof arguments[i] === 'number') {
       product = product.map(z => z * arguments[i]);
     } else {
-      product = [
-        product[0] * arguments[i][0] - product[1] * arguments[i][1],
-        product[0] * arguments[i][1] + product[1] * arguments[i][0]
-      ];
+      // if (typeof arguments[i][0] === 'number') {
+        product = [
+          product[0] * arguments[i][0] - product[1] * arguments[i][1],
+          product[0] * arguments[i][1] + product[1] * arguments[i][0]
+        ];
+      // } else {
+      //   product = [
+      //     Big(product[0]).times(arguments[i][0]).minus(Big(product[1]).times(arguments[i][1])),
+      //     Big(product[0]).times(arguments[i][1]).plus(Big(product[1]).times(arguments[i][0]))
+      //   ];
+      // }
     }
   }
   return product;
@@ -289,8 +303,13 @@ function ia() {
     if (typeof arguments[i] === 'number') {
       sum[0] += arguments[i];
     } else {
-      sum[0] += arguments[i][0];
-      sum[1] += arguments[i][1];
+      // if (arguments[i][0] === 'number') {
+        sum[0] += arguments[i][0];
+        sum[1] += arguments[i][1];
+      // } else {
+      //   sum[0] = Big(sum[0]).plus(arguments[i][0]);
+      //   sum[1] = Big(sum[1]).plus(arguments[i][1]);
+      // }
     }
   }
   return sum;

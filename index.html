@@ -5,17 +5,37 @@
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Mandelbrot</title>
-    <script src="big.js"></script>
-    <script defer src="script.js"></script>
+    <!-- <script src="big.js"></script> -->
+    <script defer src="scratch.js"></script>
     <style>
       html,
       body {
         height: 100%;
         margin: 0;
       }
+      #everything {
+        display: block;
+      }
+      #canvas {
+        display: inline-block;
+      }
+      #info {
+        display: inline-block;
+        vertical-align: top;
+      }
     </style>
   </head>
   <body>
-    <canvas id="canvas" width="560" height="700"></canvas>
+    <div id="everything">
+      <canvas id="canvas" width="560" height="700"></canvas>
+      <div id="info">
+        <pre id="display"></pre>
+        <pre id="coord"></pre>
+        <label
+          >Perturbative
+          <input type="checkbox" name="hp" onclick="hp = !hp;" />
+        </label>
+      </div>
+    </div>
   </body>
 </html>
