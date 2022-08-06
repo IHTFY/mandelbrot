@@ -143,8 +143,16 @@ canvas.addEventListener("mouseup", (e) => {
   range_x *= zoom;
   range_y *= zoom;
 
+  let t0 = performance.now();
   render(center_x, center_y, range_x, range_y, imax);
   canvas.replaceWith(render.canvas);
+  let t1 = performance.now();
+  document.getElementById(
+    "display"
+  ).textContent = `Center: ${center_x}, ${center_y}
+Range: ${range_x}, ${range_y}
+Time: ${t1 - t0}ms ${false ? "perturbed" : "normal"}`;
+  // Time: ${t1 - t0}ms ${hp ? "perturbed" : "normal"}`;
 });
 
 document.getElementById(
