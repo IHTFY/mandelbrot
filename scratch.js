@@ -1,7 +1,10 @@
-const display = document.getElementById('display');
+const display = document.getElementById("display");
 
-const canvas = document.getElementById('canvas');
-const ctx = canvas.getContext('2d');
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d", {
+  alpha: false,
+  imageSmoothingEnabled: false,
+});
 if (window.innerWidth / window.innerHeight > 1.25) {
   // wide screen, fill height
   ctx.canvas.height = window.innerHeight;
@@ -10,7 +13,7 @@ if (window.innerWidth / window.innerHeight > 1.25) {
   // narrow screen, fill width
   ctx.canvas.width = window.innerWidth;
   ctx.canvas.height = window.innerWidth / 1.25;
-};
+}
 const w = ctx.canvas.width;
 const h = ctx.canvas.height;
 
@@ -30,7 +33,7 @@ function hslToRgb(h, s, l) {
       if (t < 1 / 2) return q;
       if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
       return p;
-    }
+    };
 
     const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
     const p = 2 * l - q;
@@ -39,19 +42,19 @@ function hslToRgb(h, s, l) {
     b = hue2rgb(p, q, h - 1 / 3);
   }
 
-  return [r, g, b].map(i => Math.round(i * 255));
+  return [r, g, b].map((i) => Math.round(i * 255));
 }
 
 // complex multiply
 function ix() {
   let product = [1, 0];
   for (let i = 0; i < arguments.length; ++i) {
-    if (typeof arguments[i] === 'number') {
-      product = product.map(z => z * arguments[i]);
+    if (typeof arguments[i] === "number") {
+      product = product.map((z) => z * arguments[i]);
     } else {
       product = [
         product[0] * arguments[i][0] - product[1] * arguments[i][1],
-        product[0] * arguments[i][1] + product[1] * arguments[i][0]
+        product[0] * arguments[i][1] + product[1] * arguments[i][0],
       ];
     }
   }
@@ -67,7 +70,7 @@ function is(a) {
 function ia() {
   let sum = [0, 0];
   for (let i = 0; i < arguments.length; ++i) {
-    if (typeof arguments[i] === 'number') {
+    if (typeof arguments[i] === "number") {
       sum[0] += arguments[i];
     } else {
       sum[0] += arguments[i][0];
@@ -83,14 +86,13 @@ function dot(a, b) {
   return a.map((_, i) => a[i] * b[i]).reduce((m, n) => m + n);
 }
 
-
 const imax = 4000;
 
 function mandel_normal(c) {
   z = [0, 0];
   for (let i = 0; i < imax; ++i) {
     if (dot(z, z) > 4) {
-      return i - Math.log2(Math.log2(dot(z, z))) + 4.;
+      return i - Math.log2(Math.log2(dot(z, z))) + 4;
     }
     z = ia(is(z), c);
   }
@@ -147,20 +149,20 @@ function mandel_perturbative_faster(ref_x, ref_y, dz_x, dz_y) {
 
     [z1_x, z1_y] = [
       2 * z0_x * z1_x - z0_y * z1_y + 1 + z1z1_x * dz_x - z1z1_y * dz_y,
-      2 * z0_x * z1_y + z0_y * z1_x + z1z1_x * dz_y + z1z1_y * dz_x
+      2 * z0_x * z1_y + z0_y * z1_x + z1z1_x * dz_y + z1z1_y * dz_x,
     ];
 
-    [z0_x, z0_y] = [(z0_x * z0_x - z0_y * z0_y) + ref_x, (2 * z0_x * z0_y) + ref_y];
+    [z0_x, z0_y] = [z0_x * z0_x - z0_y * z0_y + ref_x, 2 * z0_x * z0_y + ref_y];
   }
   return 0;
 }
 
 // returns a color based on a 1D color scale
 function palette(i) {
-  if (i === 0) return '#000';
+  if (i === 0) return [0, 0, 0];
   const paletteLength = 250;
   const offset = 130;
-  return hslToRgb((i + offset) / paletteLength % 1, 1, 0.5);
+  return hslToRgb(((i + offset) / paletteLength) % 1, 1, 0.5);
 }
 
 // sets color of a pixel
@@ -172,12 +174,10 @@ function plot(imageData, pixel, iter) {
   imageData.data[pixel * 4 + 3] = 255;
 }
 
-
 let center_x = -0.75;
 let center_y = 0;
 let range_x = 3.5;
 let range_y = 2.8;
-
 
 let hp = false;
 
@@ -187,8 +187,8 @@ function draw(cx, cy, xrange, yrange) {
 
   if (h_res <= 1e-16 || w_res <= 1e-16) {
     hp = true;
-    document.getElementsByName('hp')[0].checked = true;
-    document.getElementsByName('hp')[0].disabled = true;
+    document.getElementsByName("hp")[0].checked = true;
+    document.getElementsByName("hp")[0].disabled = true;
   }
 
   let t0 = performance.now();
@@ -196,7 +196,7 @@ function draw(cx, cy, xrange, yrange) {
     let iter = 0;
 
     // pixel distance from center
-    let dx = p % w - w / 2;
+    let dx = (p % w) - w / 2;
     let dy = Math.floor(p / w) - h / 2;
 
     if (hp) {
@@ -209,10 +209,9 @@ function draw(cx, cy, xrange, yrange) {
   }
   let t1 = performance.now();
 
-
-  document.getElementById('display').textContent = `Center: ${cx}, ${cy}
+  document.getElementById("display").textContent = `Center: ${cx}, ${cy}
 Range: ${xrange}, ${yrange}
-Time: ${t1 - t0}ms ${hp ? 'perturbed' : 'normal'}`;
+Time: ${t1 - t0}ms ${hp ? "perturbed" : "normal"}`;
 
   // draw
   ctx.putImageData(imageData, 0, 0);
@@ -220,17 +219,16 @@ Time: ${t1 - t0}ms ${hp ? 'perturbed' : 'normal'}`;
 
 draw(center_x, center_y, range_x, range_y);
 
-
 // handle zooming
-canvas.addEventListener('click', e => {
+canvas.addEventListener("click", (e) => {
   const rect = canvas.getBoundingClientRect();
 
   let w_res = range_x / w;
   let h_res = range_y / h;
 
   // update global center
-  center_x += ((e.clientX - rect.left) - (w / 2)) * w_res;
-  center_y += ((e.clientY - rect.top) - (h / 2)) * h_res;
+  center_x += (e.clientX - rect.left - w / 2) * w_res;
+  center_y += (e.clientY - rect.top - h / 2) * h_res;
 
   // update global range
   range_x /= 4;
@@ -240,19 +238,19 @@ canvas.addEventListener('click', e => {
 });
 
 // display cursor location info
-canvas.addEventListener('mousemove', e => {
+canvas.addEventListener("mousemove", (e) => {
   const rect = canvas.getBoundingClientRect();
 
   let w_res = range_x / w;
   let h_res = range_y / h;
 
-  let dx = ((e.clientX - rect.left) - (w / 2));
-  let dy = ((e.clientY - rect.top) - (h / 2));
+  let dx = e.clientX - rect.left - w / 2;
+  let dy = e.clientY - rect.top - h / 2;
 
   let x0 = center_x + dx * w_res;
   let y0 = center_y + dy * h_res;
 
-  document.getElementById('coord').textContent = `X: ${x0}
+  document.getElementById("coord").textContent = `X: ${x0}
 Y :${y0}
 iter: ${mandel_normal_faster(x0, y0)}`;
 });
