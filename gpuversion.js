@@ -129,7 +129,7 @@ canvas.replaceWith(render.canvas);
 canvas = render.canvas;
 canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 canvas.addEventListener("mouseup", (e) => {
-  let zoom = e.button === 2 ? 4 : 0.25;
+  let zoom = e.button === 2 ? 2 : 0.5;
   const rect = canvas.getBoundingClientRect();
 
   let w_res = range_x / w;
