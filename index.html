@@ -41,10 +41,27 @@
       <div id="info">
         <pre id="display"></pre>
         <pre id="coord"></pre>
-        <label
-          >Perturbative
-          <input type="checkbox" name="hp" />
-        </label>
+        <div>
+          <label
+            >Perturbative
+            <input type="checkbox" name="hp" />
+          </label>
+        </div>
+        <div>
+          <label>
+            Max Iterations
+            <input
+              type="range"
+              id="imax"
+              name="imax"
+              min="10"
+              max="100000"
+              value="4000"
+              step="1"
+            />
+            <span id="imaxDisplay">4000</span>
+          </label>
+        </div>
       </div>
     </div>
   </body>
