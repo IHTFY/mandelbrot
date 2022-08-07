@@ -21,7 +21,12 @@ if (window.innerWidth / window.innerHeight > 1.25) {
 const w = ctx.canvas.width;
 const h = ctx.canvas.height;
 
-const imax = 4000;
+let imax = 4000;
+const slider = document.getElementsByName("imax")[0];
+slider.addEventListener("input", () => {
+  imax = parseInt(slider.value);
+  document.getElementById("imaxDisplay").textContent = slider.value;
+});
 
 const hp = () => document.getElementsByName("hp")[0].checked;
 
