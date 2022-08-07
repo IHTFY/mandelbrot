@@ -41,8 +41,7 @@ function h2c(h) {
 // returns a color based on a 1D color scale
 function palette(i) {
   if (i === 0) return [0, 0, 0];
-  // const paletteLength = 250;
-  const paletteLength = 6; // how many iterations before colors loop
+  const paletteLength = 250; // how many iterations before colors loop
   const offset = 0; // [0,1)
 
   const h = i / paletteLength + offset;
