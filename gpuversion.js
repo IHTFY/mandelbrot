@@ -23,45 +23,34 @@ const h = ctx.canvas.height;
 
 const imax = 4000;
 
-function hue2rgb(p, q, t) {
-  if (t < 0) ++t;
-  if (t > 1) --t;
-  if (t < 1 / 6) return p + (q - p) * 6 * t;
-  if (t < 1 / 2) return q;
-  if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
-  return p;
-}
+const hp = () => document.getElementsByName("hp")[0].checked;
 
-// modified from https://gist.github.com/mjackson/5311256
-function hslToRgb(h, s, l) {
-  let r = 1;
-  let g = 1;
-  let b = 1;
-
-  if (s > 0) {
-    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-    const p = 2 * l - q;
-    r = hue2rgb(p, q, h + 1 / 3);
-    g = hue2rgb(p, q, h);
-    b = hue2rgb(p, q, h - 1 / 3);
-  }
-
-  return [r, g, b];
+/**
+ *
+ * @param {number} h float from 0 to 1, but will automatically mod to be in the domain
+ * @returns
+ */
+function h2c(h) {
+  h = ((h % 1) + 1) % 1;
+  if (h < 1 / 6) return 6 * h;
+  if (h < 1 / 2) return 1;
+  if (h < 2 / 3) return 4 - 6 * h;
+  return 0;
 }
 
 // returns a color based on a 1D color scale
 function palette(i) {
   if (i === 0) return [0, 0, 0];
-  const paletteLength = 250;
-  const offset = 15;
+  // const paletteLength = 250;
+  const paletteLength = 6; // how many iterations before colors loop
+  const offset = 0; // [0,1)
 
-  const h = ((i + offset) / paletteLength) % 1;
-  // const r = hue2rgb(0, 1, h + 1 / 3);
-  // const g = hue2rgb(0, 1, h);
-  // const b = hue2rgb(0, 1, h - 1 / 3);
+  const h = i / paletteLength + offset;
+  const r = h2c(h + 1 / 3);
+  const g = h2c(h);
+  const b = h2c(h - 1 / 3);
 
-  // return [r, g, b];
-  return hslToRgb(((i + offset) / paletteLength) % 1, 1, 0.5);
+  return [r, g, b];
 }
 
 function track(x0, y0, imax) {
@@ -83,7 +72,7 @@ function mandel_normal_faster(x0, y0, imax) {
   let y = 0;
   // iterate to find when it leaves the circle
   for (let i = 0; i < imax; ++i) {
-    if (x * x + y * y > 4) return i; //- Math.log2(Math.log2(x * x + y * y)) + 4;
+    if (x * x + y * y > 4) return i - Math.log2(Math.log2(x * x + y * y)) + 1;
     let xNew = x * x - y * y + x0;
     y = 2 * x * y + y0;
     x = xNew;
@@ -91,14 +80,40 @@ function mandel_normal_faster(x0, y0, imax) {
   return 0;
 }
 
+function mandel_perturbative_faster(ref_x, ref_y, dz_x, dz_y, imax) {
+  let z0_x = 0;
+  let z0_y = 0;
+  let z1_x = 0;
+  let z1_y = 0;
+  for (let i = 0; i < imax; ++i) {
+    let t_x = z0_x + z1_x * dz_x - z1_y * dz_y;
+    let t_y = z0_y + z1_x * dz_y + z1_y * dz_x;
+    if (t_x * t_x + t_y * t_y > 4) {
+      return i - Math.log2(Math.log2(t_x * t_x + t_y * t_y)) + 1;
+    }
+
+    let z1z1_x = z1_x * z1_x - z1_y * z1_y;
+    let z1z1_y = 2 * z1_x * z1_y;
+
+    let z1_x_temp =
+      2 * z0_x * z1_x - z0_y * z1_y + 1 + z1z1_x * dz_x - z1z1_y * dz_y;
+    z1_y = 2 * z0_x * z1_y + z0_y * z1_x + z1z1_x * dz_y + z1z1_y * dz_x;
+    z1_x = z1_x_temp;
+
+    z0_x = z0_x * z0_x - z0_y * z0_y + ref_x;
+    z0_y = 2 * z0_x * z0_y + ref_y;
+  }
+  return 0;
+}
+
 const gpu = new GPU()
   .addFunction(mandel_normal_faster)
+  .addFunction(mandel_perturbative_faster)
   .addFunction(palette)
-  .addFunction(hslToRgb)
-  .addFunction(hue2rgb);
+  .addFunction(h2c);
 
 const render = gpu
-  .createKernel(function (cx, cy, xrange, yrange, imax) {
+  .createKernel(function (cx, cy, xrange, yrange, imax, hp) {
     // dimensions of a pixel in mandelbrot coordinates
     let w_res = xrange / this.output.x;
     let h_res = yrange / this.output.y;
@@ -107,10 +122,17 @@ const render = gpu
     let dx = this.thread.x - this.output.x / 2;
     let dy = this.output.y / 2 - this.thread.y;
 
+    let dx0 = dx * w_res;
+    let dy0 = dy * h_res;
+
     // mandelbrot coordinates
-    let x0 = cx + dx * w_res;
-    let y0 = cy + dy * h_res;
-    let iter = mandel_normal_faster(x0, y0, imax);
+    let x0 = cx + dx0;
+    let y0 = cy + dy0;
+
+    // why is this reversed?
+    let iter = hp
+      ? mandel_perturbative_faster(cx, cy, dx0, dy0, imax)
+      : mandel_normal_faster(x0, y0, imax);
 
     let col = palette(iter);
 
@@ -124,7 +146,7 @@ let center_y = 0;
 let range_x = 3.5;
 let range_y = 2.8;
 
-render(center_x, center_y, range_x, range_y, imax);
+render(center_x, center_y, range_x, range_y, imax, hp());
 canvas.replaceWith(render.canvas);
 canvas = render.canvas;
 canvas.addEventListener("contextmenu", (e) => e.preventDefault());
@@ -144,15 +166,15 @@ canvas.addEventListener("mouseup", (e) => {
   range_y *= zoom;
 
   let t0 = performance.now();
-  render(center_x, center_y, range_x, range_y, imax);
+  render(center_x, center_y, range_x, range_y, imax, hp());
   canvas.replaceWith(render.canvas);
   let t1 = performance.now();
+
   document.getElementById(
     "display"
   ).textContent = `Center: ${center_x}, ${center_y}
 Range: ${range_x}, ${range_y}
-Time: ${t1 - t0}ms ${false ? "perturbed" : "normal"}`;
-  // Time: ${t1 - t0}ms ${hp ? "perturbed" : "normal"}`;
+Time: ${t1 - t0}ms ${hp() ? "perturbed" : "normal"}`;
 });
 
 document.getElementById(
