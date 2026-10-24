@@ -2,8 +2,8 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
     <title>Mandelbrot</title>
 
     <!-- Google Auto Ads -->
@@ -13,56 +13,151 @@
       crossorigin="anonymous"
     ></script>
 
-    <script src="gpu-browser.min.js"></script>
-    <script defer src="gpuversion.js"></script>
-    <!-- <script defer src="scratch.js"></script> -->
+    <script defer src="mandelbrot.js"></script>
     <style>
       html,
       body {
         height: 100%;
         margin: 0;
-      }
-      #everything {
-        display: block;
+        overflow: hidden;
+        background: #000;
+        color: #e8e8f0;
+        font: 14px/1.35 system-ui, sans-serif;
       }
       #canvas {
-        display: inline-block;
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        touch-action: none;
+        cursor: crosshair;
       }
-      #info {
-        display: inline-block;
-        vertical-align: top;
+      #panel {
+        position: fixed;
+        top: max(8px, env(safe-area-inset-top));
+        left: max(8px, env(safe-area-inset-left));
+        width: min(300px, calc(100vw - 16px));
+        max-height: calc(100% - 16px);
+        overflow: auto;
+        box-sizing: border-box;
+        padding: 10px 12px;
+        border-radius: 10px;
+        background: rgba(16, 16, 24, 0.82);
+        backdrop-filter: blur(6px);
+        transition: width 180ms ease-out;
+      }
+      #panel.collapsed {
+        width: 44px;
+        padding: 6px;
+        overflow: hidden;
+      }
+      #panel.collapsed > :not(#toggle-panel) {
+        display: none;
+      }
+      #toggle-panel {
+        float: right;
+        width: 32px;
+        height: 32px;
+        padding: 0;
+      }
+      h2 {
+        margin: 10px 0 4px;
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: #9a9ab0;
+      }
+      h2:first-of-type {
+        margin-top: 4px;
+      }
+      pre {
+        margin: 0;
+        font: 12px/1.35 ui-monospace, monospace;
+        white-space: pre-wrap;
+        word-break: break-all;
+      }
+      label {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 4px 0;
+      }
+      input[type="range"] {
+        flex: 1;
+        min-width: 0;
+      }
+      .value {
+        min-width: 64px;
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+      .buttons {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px;
+        margin-top: 8px;
+      }
+      button {
+        padding: 7px 8px;
+        border: 0;
+        border-radius: 6px;
+        background: #2c2c40;
+        color: inherit;
+        font: inherit;
+        cursor: pointer;
+        transition: transform 100ms ease-out, background 120ms;
+      }
+      button:hover {
+        background: #3a3a54;
+      }
+      button:active {
+        transform: scale(0.96);
+      }
+      #status {
+        color: #b8b8cc;
+      }
+      .hint {
+        margin-top: 8px;
+        font-size: 12px;
+        color: #9a9ab0;
       }
     </style>
   </head>
   <body>
-    <div id="everything">
-      <canvas id="canvas" width="1050" height="840"></canvas>
-      <!-- <canvas id="canvas" width="700" height="560"></canvas> -->
-      <div id="info">
-        <pre id="display"></pre>
-        <pre id="coord"></pre>
-        <div>
-          <label
-            >Perturbative
-            <input type="checkbox" name="hp" />
-          </label>
-        </div>
-        <div>
-          <label>
-            Max Iterations
-            <input
-              type="range"
-              id="imax"
-              name="imax"
-              min="10"
-              max="100000"
-              value="4000"
-              step="1"
-            />
-            <span id="imaxDisplay">4000</span>
-          </label>
-        </div>
+    <canvas id="canvas"></canvas>
+    <div id="panel">
+      <button id="toggle-panel" aria-label="Show or hide the panel">☰</button>
+      <h2>Center</h2>
+      <pre id="center"></pre>
+      <h2>Zoom</h2>
+      <pre id="zoom"></pre>
+      <h2>Reference</h2>
+      <div id="reference"></div>
+      <div id="status"></div>
+
+      <h2>Iterations</h2>
+      <label>
+        <input type="range" id="iterations" min="1" max="6" step="0.01" value="3.602" />
+        <span class="value" id="iterations-value">4,000</span>
+      </label>
+
+      <h2>Colors</h2>
+      <label>Cycle <input type="range" id="cycle" min="10" max="2000" step="1" value="250" /></label>
+      <label>Hue <input type="range" id="hue" min="0" max="1" step="0.005" value="0" /></label>
+      <label><input type="checkbox" id="slopes" checked /> Slope shading</label>
+      <label><input type="checkbox" id="edges" checked /> Darken edges</label>
+
+      <div class="buttons">
+        <button id="minibrot" title="Find the nearest minibrot and zoom to it">Zoom to minibrot</button>
+        <button id="zoom-out">Zoom out</button>
+        <button id="reset">Reset</button>
+        <button id="save">Save image</button>
       </div>
+
+      <h2>Pointer</h2>
+      <pre id="cursor"></pre>
+      <div class="hint">Click to zoom in, right-click to zoom out, drag to pan, scroll or pinch to zoom.</div>
     </div>
   </body>
 </html>
