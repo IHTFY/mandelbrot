@@ -83,9 +83,25 @@
         gap: 8px;
         margin: 4px 0;
       }
-      input[type="range"] {
+      input[type="range"],
+      select {
         flex: 1;
         min-width: 0;
+      }
+      select {
+        padding: 4px;
+        border: 0;
+        border-radius: 6px;
+        background: #2c2c40;
+        color: inherit;
+        font: inherit;
+      }
+      input[type="color"] {
+        width: 40px;
+        height: 24px;
+        padding: 0;
+        border: 0;
+        background: none;
       }
       .value {
         min-width: 64px;
@@ -143,10 +159,39 @@
       </label>
 
       <h2>Colors</h2>
+      <label>
+        Palette
+        <select id="palette">
+          <option value="rainbow">Rainbow</option>
+          <option value="fire">Fire</option>
+          <option value="ocean">Ocean</option>
+          <option value="ice">Ice</option>
+          <option value="sunset">Sunset</option>
+          <option value="gray">Gray</option>
+        </select>
+      </label>
+      <label>
+        Spacing
+        <select id="transfer" title="How color cycles stretch with the iteration count">
+          <option value="0">Linear</option>
+          <option value="1">Square root</option>
+          <option value="2">Log</option>
+        </select>
+      </label>
       <label>Cycle <input type="range" id="cycle" min="10" max="2000" step="1" value="250" /></label>
-      <label>Hue <input type="range" id="hue" min="0" max="1" step="0.005" value="0" /></label>
-      <label><input type="checkbox" id="slopes" checked /> Slope shading</label>
+      <label>Offset <input type="range" id="offset" min="0" max="1" step="0.005" value="0" /></label>
+      <label>Slopes <input type="range" id="slopes" min="0" max="3" step="0.05" value="1" /></label>
+      <label>Light <input type="range" id="angle" min="0" max="360" step="1" value="45" /></label>
       <label><input type="checkbox" id="edges" checked /> Darken edges</label>
+      <label>Inside <input type="color" id="inside" value="#000000" /></label>
+
+      <h2>Resolution</h2>
+      <label>
+        <select id="resolution" aria-label="Resolution" title="Lower renders faster">
+          <option value="0.5">Half (faster)</option>
+          <option value="1" selected>Full</option>
+        </select>
+      </label>
 
       <div class="buttons">
         <button id="minibrot" title="Find the nearest minibrot and zoom to it">Zoom to minibrot</button>
