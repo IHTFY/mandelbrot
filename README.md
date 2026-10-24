@@ -1,4 +1,6 @@
 # mandelbrot
+![The Mandelbrot set in the Ocean palette](icons/og-image.png)
+
 Deep-zoom Mandelbrot viewer that runs on the GPU in the browser.
 
 Click to zoom in, right-click to zoom out, drag to pan, scroll or pinch to zoom. "Zoom to minibrot" finds the nearest minibrot and zooms to it. The location is saved in the URL, so you can share a view.
@@ -32,3 +34,6 @@ Coloring follows KF's options: a palette (a cyclic gradient or the rainbow), the
 The view size and the reference search use JavaScript doubles, which bottom out near $10^{-308}$, so zooming stops at a pixel size of $10^{-290}$ (a zoom of roughly $10^{288}$). The deep shader is a few times slower per iteration than the plain one, and the reference orbit takes longer as the coordinates get more digits.
 
 The viewer needs WebGL2 with float render targets, which current desktop and mobile browsers have.
+
+## Icons
+The icons in `icons/` are renders from the viewer itself: the Ocean palette with a cycle of 25, at `#re=-0.765&im=0&r=1.3&it=1000` (square) and `r=1.25` (the 1200×630 sharing image), each rendered at twice the size and scaled down.
