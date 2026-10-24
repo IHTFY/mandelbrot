@@ -179,7 +179,7 @@
         </select>
       </label>
       <label>Cycle <input type="range" id="cycle" min="10" max="2000" step="1" value="250" /></label>
-      <label>Offset <input type="range" id="hue" min="0" max="1" step="0.005" value="0" /></label>
+      <label>Offset <input type="range" id="offset" min="0" max="1" step="0.005" value="0" /></label>
       <label>Slopes <input type="range" id="slopes" min="0" max="3" step="0.05" value="1" /></label>
       <label>Light <input type="range" id="angle" min="0" max="360" step="1" value="45" /></label>
       <label><input type="checkbox" id="edges" checked /> Darken edges</label>
@@ -187,7 +187,7 @@
 
       <h2>Resolution</h2>
       <label>
-        <select id="resolution" title="Lower renders faster">
+        <select id="resolution" aria-label="Resolution" title="Lower renders faster">
           <option value="0.5">Half (faster)</option>
           <option value="1" selected>Full</option>
         </select>

@@ -38,8 +38,8 @@ function ldexp(x, e) {
 // Derivatives grow past the range of doubles at deep zooms, so they're kept
 // as (x + iy) 2^e, moving powers of 2 into e once they get large.
 function shrink(x, y, e) {
-  if (Math.max(Math.abs(x), Math.abs(y)) < 2 ** 500) return [x, y, e];
-  return [x * 2 ** -500, y * 2 ** -500, e + 500];
+  if (Math.max(Math.abs(x), Math.abs(y)) < 2 ** 200) return [x, y, e];
+  return [x * 2 ** -200, y * 2 ** -200, e + 200];
 }
 
 // Lowest period p such that a ball of `radius` around c may contain a

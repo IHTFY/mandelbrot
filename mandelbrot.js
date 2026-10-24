@@ -179,10 +179,6 @@ precision highp sampler2D;
 ${deep ? "#define DEEP" : ""}
 #define MAX_LEVELS ${MAX_LEVELS}
 const float ESCAPE_R2 = ${ESCAPE_R2.toExponential()};
-// A pixel is inside once |dW/dW_1| < 2^INTERIOR_LOG2: its orbit is being
-// pulled into an attracting cycle (the derivative shrinks by the cycle's
-// multiplier every period) and will never escape.
-const float INTERIOR_LOG2 = -20.0;
 
 uniform sampler2D uRef;
 uniform sampler2D uBla;
@@ -213,7 +209,7 @@ vec2 ldexp2(vec2 v, int k) {
 // |v| within [2^-20, 2^20] so later products can't overflow.
 void renorm(inout vec2 v, inout int e) {
   float m = max(abs(v.x), abs(v.y));
-  if (m > 1048576.0 || (m < 9.5367431640625e-7 && m > 0.0)) {
+  if (m > exp2(20.0) || (m < exp2(-20.0) && m > 0.0)) {
     int k = int(floor(log2(m)));
     v *= exp2(float(-k));
     e += k;
@@ -221,6 +217,13 @@ void renorm(inout vec2 v, inout int e) {
 }
 
 void main() {
+  // A pixel is inside once |dW/dW_1| < 2^interiorLog2: its orbit is being
+  // pulled into an attracting cycle (the derivative shrinks by the cycle's
+  // multiplier every period) and will never escape. Outside points near a
+  // parabolic point (a cusp or bulb root) linger there and the derivative
+  // shrinks too, but only to about 1/N^2 for an orbit escaping after N
+  // iterations, so the threshold sits 2^24 below that.
+  float interiorLog2 = -24.0 - 2.0 * log2(float(uMaxIter));
   vec2 delta = uOffsetPx + (gl_FragCoord.xy - uHalfRes) * uSigma; // dc / 2^uE0
   vec2 Z = vec2(0.0);
   vec2 W = vec2(0.0);
@@ -234,27 +237,30 @@ void main() {
   while (true) {
     W = Z + w * exp2(float(e));
     if (dot(W, W) > ESCAPE_R2) { result = 1; break; }
-    if (ev < 0 && log2(norm1(v)) + float(ev) < INTERIOR_LOG2) { result = 2; break; }
+    if (ev < 0 && log2(norm1(v)) + float(ev) < interiorLog2) { result = 2; break; }
     if (n >= uMaxIter) break;
-    // W = Ws 2^eW. While z is tiny, W is scaled too when Z is no bigger than
-    // about z (Z is 0 or at least 2^-149, so ldexp2 stays in range); only
+    // W = Ws 2^eW. While z is tiny, W is scaled too when Z is 0 or no
+    // bigger than about z (then Z >= 2^-149 keeps ldexp2 in range); only
     // then can W be smaller than z, so only then is a rebase possible.
+    // Ws is renormalized so the products with q and v below can't underflow.
     vec2 Ws = W; int eW = 0;
     bool rebase = false;
     if (e >= -40) {
       rebase = norm1(W) < norm1(w * exp2(float(e)));
+    } else if (Z == vec2(0.0)) {
+      Ws = w;
+      eW = e;
     } else if (norm1(Z) <= exp2(float(e + 40))) {
       Ws = ldexp2(Z, -e) + w;
       eW = e;
       rebase = norm1(Ws) < norm1(w);
     }
+    renorm(Ws, eW);
     if (m == uRefLen - 1 || rebase) {
       w = Ws;
       e = eW;
-      renorm(w, e);
       Z = vec2(0.0);
       m = 0;
-      Ws = w; eW = e;
     }
     int best = -1;
     int bestLen = 0;
@@ -293,27 +299,22 @@ void main() {
     } else {
       // z -> 2 Z z + z^2 + dc
       if (e >= -40) {
-        // |z| > 2^-60 while |dc| < 2^-90, so dc is below float32 precision
-        // and plain floats do
+        // |z| > 2^-60, so plain floats do; dc may still matter when Z is
+        // near 0, and underflows to 0 when it doesn't
         vec2 z = w * exp2(float(e));
-        w = cmul(2.0 * Z + z, z);
+        w = cmul(2.0 * Z + z, z) + ldexp2(delta, uE0);
         e = 0;
       } else {
         // each term at its own power of 2
-        int e3 = max(max(e, 2 * e), uE0);
+        int e3 = max(e, uE0); // e < 0, so z^2 is smaller than z
         w = ldexp2(2.0 * cmul(Z, w), e - e3) + ldexp2(cmul(w, w), 2 * e - e3) + ldexp2(delta, uE0 - e3);
         e = e3;
       }
-      // dW/dc -> 2 W dW/dc + 1, where the 1 only matters while dW/dc is small
+      // dW/dc -> 2 W dW/dc + 1
       int e1 = eW + eq;
-      if (e1 > 30) {
-        q = 2.0 * cmul(Ws, q);
-        eq = e1;
-      } else {
-        int e3 = max(e1, 0);
-        q = ldexp2(2.0 * cmul(Ws, q), e1 - e3) + vec2(exp2(float(-e3)), 0.0);
-        eq = e3;
-      }
+      int e3 = max(e1, 0);
+      q = ldexp2(2.0 * cmul(Ws, q), e1 - e3) + vec2(exp2(float(-e3)), 0.0);
+      eq = e3;
       if (n > 0) {
         v = 2.0 * cmul(Ws, v);
         ev += eW;
@@ -339,7 +340,7 @@ void main() {
   while (true) {
     W = Z + z;
     if (dot(W, W) > ESCAPE_R2) { result = 1; break; }
-    if (norm1(v) < exp2(INTERIOR_LOG2)) { result = 2; break; }
+    if (norm1(v) < exp2(interiorLog2)) { result = 2; break; }
     if (n >= uMaxIter) break;
     if (m == uRefLen - 1 || norm1(W) < norm1(z)) {
       z = W;
@@ -408,7 +409,7 @@ uniform vec2 uHalfRes;
 uniform float uOldScale;
 uniform vec2 uOldShift;
 uniform float uCycle;
-uniform float uHue;
+uniform float uOffset;
 uniform int uTransfer; // 0 linear, 1 square root, 2 log
 uniform vec3 uStops[MAX_STOPS]; // cyclic gradient; none means rainbow
 uniform int uStopCount;
@@ -445,18 +446,14 @@ void main() {
   float h = uTransfer == 1 ? sqrt(s.x / uCycle)
           : uTransfer == 2 ? log(1.0 + s.x) / log(1.0 + uCycle)
           : s.x / uCycle;
-  h = fract(h + uHue);
+  h = fract(h + uOffset);
   vec3 col;
   if (uStopCount == 0) {
     col = vec3(h2c(h + 1.0 / 3.0), h2c(h), h2c(h - 1.0 / 3.0));
   } else {
     float x = h * float(uStopCount);
-    int i = int(x);
-    vec3 a = uStops[0], b = uStops[0];
-    for (int k = 0; k < MAX_STOPS; k++) {
-      if (k == i) a = uStops[k];
-      if (k == (i + 1) % uStopCount) b = uStops[k];
-    }
+    int i = min(int(x), uStopCount - 1);
+    vec3 a = uStops[i], b = uStops[(i + 1) % uStopCount];
     col = mix(a, b, smoothstep(0.0, 1.0, fract(x)));
   }
   if (uSlopes > 0.0) {
@@ -835,7 +832,7 @@ function drawColors() {
   const stops = PALETTES[controls.palette.value];
   const angle = (Number(controls.angle.value) * Math.PI) / 180;
   gl.uniform1f(u.uCycle, Number(controls.cycle.value));
-  gl.uniform1f(u.uHue, Number(controls.hue.value));
+  gl.uniform1f(u.uOffset, Number(controls.offset.value));
   gl.uniform1i(u.uTransfer, Number(controls.transfer.value));
   gl.uniform1i(u.uStopCount, stops.length);
   if (stops.length) gl.uniform3fv(u.uStops, stops.flatMap(hexColor));
@@ -846,7 +843,7 @@ function drawColors() {
   gl.drawArrays(gl.TRIANGLES, 0, 3);
 }
 
-// Cyclic gradients, light to dark and back; [] is the HSV rainbow.
+// Cyclic gradients that run from one end to the other and back; [] is the HSV rainbow.
 const PALETTES = {
   rainbow: [],
   fire: ["#000000", "#5c0a00", "#d43a00", "#ff9e1f", "#fff3c4", "#ff9e1f", "#d43a00", "#5c0a00"],
@@ -905,7 +902,7 @@ const controls = {
   iterations: document.getElementById("iterations"),
   iterationsValue: document.getElementById("iterations-value"),
   cycle: document.getElementById("cycle"),
-  hue: document.getElementById("hue"),
+  offset: document.getElementById("offset"),
   palette: document.getElementById("palette"),
   transfer: document.getElementById("transfer"),
   slopes: document.getElementById("slopes"),
@@ -950,7 +947,7 @@ function setIterations(value) {
 controls.iterations.addEventListener("input", () => setIterations(10 ** Number(controls.iterations.value)));
 for (const c of [
   controls.cycle,
-  controls.hue,
+  controls.offset,
   controls.palette,
   controls.transfer,
   controls.slopes,
