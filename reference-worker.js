@@ -14,14 +14,32 @@
 
 const ESCAPE_R2 = 1e6; // must match ESCAPE_R2 in mandelbrot.js
 
-// Number() rounds a BigInt of any size correctly, so small values keep full
-// relative precision (bits stays far below the 1023 where 2^-bits underflows).
+// Number(v) rounds a BigInt correctly but is Infinity past 2^1024, and
+// 2^bits overflows past bits = 1023, so deep coordinates are scaled in steps.
+const BIG = 1n << 1000n;
 function toNum(v, bits) {
-  return Number(v) * 2 ** -bits;
+  if (bits <= 1000) return Number(v) * 2 ** -bits;
+  if (v < BIG && v > -BIG) return Number(v) * 2 ** -1000 * 2 ** (1000 - bits);
+  return Number(v >> BigInt(bits - 1000)) * 2 ** -1000;
 }
 
 function fromNum(x, bits) {
-  return BigInt(Math.round(x * 2 ** bits));
+  if (x === 0) return 0n;
+  const e = Math.floor(Math.log2(Math.abs(x)));
+  if (bits + e < 1000) return BigInt(Math.round(x * 2 ** (bits >> 1) * 2 ** (bits - (bits >> 1))));
+  return BigInt(x * 2 ** (60 - e)) << BigInt(bits + e - 60);
+}
+
+// x 2^e for any e, in two steps since 2^e alone overflows past e = 1023.
+function ldexp(x, e) {
+  return x * 2 ** (e >> 1) * 2 ** (e - (e >> 1));
+}
+
+// Derivatives grow past the range of doubles at deep zooms, so they're kept
+// as (x + iy) 2^e, moving powers of 2 into e once they get large.
+function shrink(x, y, e) {
+  if (Math.max(Math.abs(x), Math.abs(y)) < 2 ** 500) return [x, y, e];
+  return [x * 2 ** -500, y * 2 ** -500, e + 500];
 }
 
 // Lowest period p such that a ball of `radius` around c may contain a
@@ -55,12 +73,14 @@ function nucleus(cr, ci, bits, period, tolerance, maxStep) {
     let zi = 0n;
     let dr = 0;
     let di = 0;
+    let de = 0; // dz = (dr + i di) 2^de
     for (let i = 0; i < period; i++) {
       const x = toNum(zr, bits);
       const y = toNum(zi, bits);
-      const t = 2 * (x * dr - y * di) + 1;
+      const t = 2 * (x * dr - y * di) + 2 ** -de;
       di = 2 * (x * di + y * dr);
       dr = t;
+      [dr, di, de] = shrink(dr, di, de);
       const u = ((zr * zr - zi * zi) >> F) + cr;
       zi = ((zr * zi) >> (F - 1n)) + ci;
       zr = u;
@@ -75,8 +95,8 @@ function nucleus(cr, ci, bits, period, tolerance, maxStep) {
     const ur = dr / s;
     const ui = di / s;
     const den = ur * ur + ui * ui;
-    const deltaR = (x * ur + y * ui) / den;
-    const deltaI = (y * ur - x * ui) / den;
+    const deltaR = ldexp((x * ur + y * ui) / den, -de);
+    const deltaI = ldexp((y * ur - x * ui) / den, -de);
     const length = Math.hypot(deltaR, deltaI);
     if (!Number.isFinite(length)) return null;
     const scale = Math.min(1, maxStep / length);
@@ -95,17 +115,19 @@ function truePeriod(cr, ci, bits, period, tolerance) {
   let zi = 0n;
   let dr = 0;
   let di = 0;
+  let de = 0;
   for (let q = 1; q < period; q++) {
     const x = toNum(zr, bits);
     const y = toNum(zi, bits);
-    const t = 2 * (x * dr - y * di) + 1;
+    const t = 2 * (x * dr - y * di) + 2 ** -de;
     di = 2 * (x * di + y * dr);
     dr = t;
+    [dr, di, de] = shrink(dr, di, de);
     const u = ((zr * zr - zi * zi) >> F) + cr;
     zi = ((zr * zi) >> (F - 1n)) + ci;
     zr = u;
     if (period % q === 0) {
-      const step = Math.hypot(toNum(zr, bits), toNum(zi, bits)) / Math.hypot(dr, di);
+      const step = ldexp(Math.hypot(toNum(zr, bits), toNum(zi, bits)) / Math.hypot(dr, di), -de);
       if (step < tolerance) return q;
     }
   }
@@ -138,6 +160,7 @@ function minibrotSize(cr, ci, bits, period) {
   let zi = 0n;
   let lr = 1;
   let li = 0;
+  let le = 0; // l = (lr + i li) 2^le
   let br = 1;
   let bi = 0;
   for (let i = 1; i < period; i++) {
@@ -149,14 +172,15 @@ function minibrotSize(cr, ci, bits, period) {
     const t = 2 * (x * lr - y * li);
     li = 2 * (x * li + y * lr);
     lr = t;
+    [lr, li, le] = shrink(lr, li, le);
     const den = lr * lr + li * li;
-    br += lr / den;
-    bi -= li / den;
+    br += ldexp(lr / den, -le);
+    bi -= ldexp(li / den, -le);
   }
   // size = 1 / (b l^2)
   const l2r = lr * lr - li * li;
   const l2i = 2 * lr * li;
-  return 1 / Math.hypot(br * l2r - bi * l2i, br * l2i + bi * l2r);
+  return ldexp(1 / Math.hypot(br * l2r - bi * l2i, br * l2i + bi * l2r), -2 * le);
 }
 
 // Z_0 .. Z_n as interleaved doubles, stopping early once Z escapes.

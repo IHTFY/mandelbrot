@@ -16,13 +16,18 @@
 //   This removes perturbation glitches without detecting or re-rendering them;
 // - bilinear approximation (BLA): precomputed z -> A z + B dc steps that skip
 //   many iterations at once while z is small;
-// - derivative tracking for distance estimation and slope shading.
+// - derivative tracking for distance estimation and slope shading;
+// - scaled iterations past float32's range, to zooms of about 1e290;
+// - interior detection, so pixels inside the set stop early.
 
 const ESCAPE_R2 = 1e6; // must match reference-worker.js
 const MAX_LEVELS = 24;
 const TEX_WIDTH = 2048;
-// Smallest pixel spacing float32 deltas can represent with headroom.
-const MIN_SPACING = 1e-34;
+// Below DEEP_SPACING, float32 deltas would underflow, so pixels iterate with
+// scaled mantissas. MIN_SPACING keeps the view size and Newton tolerance
+// (spacing * 1e-6) inside the range of doubles.
+const DEEP_SPACING = 1e-32;
+const MIN_SPACING = 1e-290;
 const HOME = { re: "-0.75", im: "0", radius: 1.4 };
 
 const canvas = document.getElementById("canvas");
@@ -44,14 +49,20 @@ if (!gl.getExtension("EXT_color_buffer_float"))
 // ---------------------------------------------------------------------------
 // Fixed-point helpers (value = v / 2^bits)
 
-// Number() rounds a BigInt of any size correctly, so small values keep full
-// relative precision (bits stays far below the 1023 where 2^-bits underflows).
+// Number(v) rounds a BigInt correctly but is Infinity past 2^1024, and
+// 2^bits overflows past bits = 1023, so deep coordinates are scaled in steps.
+const BIG = 1n << 1000n;
 function toNum(v, bits) {
-  return Number(v) * 2 ** -bits;
+  if (bits <= 1000) return Number(v) * 2 ** -bits;
+  if (v < BIG && v > -BIG) return Number(v) * 2 ** -1000 * 2 ** (1000 - bits);
+  return Number(v >> BigInt(bits - 1000)) * 2 ** -1000;
 }
 
 function fromNum(x, bits) {
-  return BigInt(Math.round(x * 2 ** bits));
+  if (x === 0) return 0n;
+  const e = Math.floor(Math.log2(Math.abs(x)));
+  if (bits + e < 1000) return BigInt(Math.round(x * 2 ** (bits >> 1) * 2 ** (bits - (bits >> 1))));
+  return BigInt(x * 2 ** (60 - e)) << BigInt(bits + e - 60);
 }
 
 function rescale(v, from, to) {
@@ -152,14 +163,26 @@ void main() {
 }`;
 
 // Writes (smooth iteration count, distance estimate in pixels, surface normal)
-// per pixel; the iteration count is -1 for pixels that never escaped.
-const ITERATE = `#version 300 es
+// per pixel. The iteration count is -1 for pixels found to be inside the set
+// and -2 for pixels still unresolved after the maximum iteration count.
+//
+// Two variants share this source. The plain one iterates z in float32. The
+// DEEP one, used once pixel spacing is too small for float32, stores z, the
+// c-derivative and the z-derivative as a float32 mantissa times 2^int (the
+// scaled iterations of KF and Fraktaler), so the depth is limited only by the
+// doubles used for the view size.
+function iterateSource(deep) {
+  return `#version 300 es
 precision highp float;
 precision highp int;
 precision highp sampler2D;
-
+${deep ? "#define DEEP" : ""}
 #define MAX_LEVELS ${MAX_LEVELS}
 const float ESCAPE_R2 = ${ESCAPE_R2.toExponential()};
+// A pixel is inside once |dW/dW_1| < 2^INTERIOR_LOG2: its orbit is being
+// pulled into an attracting cycle (the derivative shrinks by the cycle's
+// multiplier every period) and will never escape.
+const float INTERIOR_LOG2 = -20.0;
 
 uniform sampler2D uRef;
 uniform sampler2D uBla;
@@ -168,29 +191,155 @@ uniform int uMaxIter;
 uniform int uLevels;
 uniform int uBlaOffset[MAX_LEVELS];
 uniform int uBlaCount[MAX_LEVELS];
-uniform vec2 uOffset;
-uniform float uSpacing;
+uniform vec2 uOffsetPx; // reference to view center, in units of 2^uE0
+uniform float uSigma; // pixel spacing in units of 2^uE0
+uniform int uE0;
 uniform vec2 uHalfRes;
 
 out vec4 outData;
 
 vec2 cmul(vec2 a, vec2 b) { return vec2(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x); }
 vec4 fetch(sampler2D t, int i) { return texelFetch(t, ivec2(i & ${TEX_WIDTH - 1}, i >> ${Math.log2(TEX_WIDTH)}), 0); }
-// L1 norm: no squaring, so tiny deltas at deep zoom don't underflow to 0
+// L1 norm: no squaring, so tiny deltas don't underflow to 0
 float norm1(vec2 v) { return abs(v.x) + abs(v.y); }
 
+// v * 2^k for |k| up to 254, past the range where exp2 alone overflows
+vec2 ldexp2(vec2 v, int k) {
+  int h = k / 2;
+  return v * exp2(float(h)) * exp2(float(k - h));
+}
+
+// Moves powers of 2 from the mantissa v into the exponent e, keeping
+// |v| within [2^-20, 2^20] so later products can't overflow.
+void renorm(inout vec2 v, inout int e) {
+  float m = max(abs(v.x), abs(v.y));
+  if (m > 1048576.0 || (m < 9.5367431640625e-7 && m > 0.0)) {
+    int k = int(floor(log2(m)));
+    v *= exp2(float(-k));
+    e += k;
+  }
+}
+
 void main() {
-  vec2 dc = uOffset + (gl_FragCoord.xy - uHalfRes) * uSpacing;
-  vec2 z = vec2(0.0);
-  vec2 d = vec2(0.0); // dW/dc times the pixel spacing
+  vec2 delta = uOffsetPx + (gl_FragCoord.xy - uHalfRes) * uSigma; // dc / 2^uE0
   vec2 Z = vec2(0.0);
   vec2 W = vec2(0.0);
   int m = 0;
   int n = 0;
-  bool escaped = false;
+  int result = 0; // 0 unresolved, 1 escaped, 2 inside
+#ifdef DEEP
+  vec2 w = vec2(0.0); int e = uE0;   // z = w 2^e
+  vec2 q = vec2(0.0); int eq = 0;    // dW/dc = q 2^eq
+  vec2 v = vec2(1.0, 0.0); int ev = 0; // dW/dW_1 = v 2^ev, for interior checks
+  while (true) {
+    W = Z + w * exp2(float(e));
+    if (dot(W, W) > ESCAPE_R2) { result = 1; break; }
+    if (ev < 0 && log2(norm1(v)) + float(ev) < INTERIOR_LOG2) { result = 2; break; }
+    if (n >= uMaxIter) break;
+    // W = Ws 2^eW. While z is tiny, W is scaled too when Z is no bigger than
+    // about z (Z is 0 or at least 2^-149, so ldexp2 stays in range); only
+    // then can W be smaller than z, so only then is a rebase possible.
+    vec2 Ws = W; int eW = 0;
+    bool rebase = false;
+    if (e >= -40) {
+      rebase = norm1(W) < norm1(w * exp2(float(e)));
+    } else if (norm1(Z) <= exp2(float(e + 40))) {
+      Ws = ldexp2(Z, -e) + w;
+      eW = e;
+      rebase = norm1(Ws) < norm1(w);
+    }
+    if (m == uRefLen - 1 || rebase) {
+      w = Ws;
+      e = eW;
+      renorm(w, e);
+      Z = vec2(0.0);
+      m = 0;
+      Ws = w; eW = e;
+    }
+    int best = -1;
+    int bestLen = 0;
+    if (m > 0) {
+      float lz = log2(norm1(w)) + float(e);
+      for (int k = 0; k < MAX_LEVELS; k++) {
+        int len = 2 << k;
+        int j = (m - 1) >> (k + 1);
+        if (k >= uLevels || ((m - 1) & (len - 1)) != 0 || j >= uBlaCount[k] || n + len > uMaxIter) break;
+        int b = uBlaOffset[k] + j;
+        if (!(lz < fetch(uBla, 2 * b).y)) break;
+        best = b;
+        bestLen = len;
+      }
+    }
+    if (best >= 0) {
+      vec4 ex = fetch(uBla, 2 * best);
+      vec4 ab = fetch(uBla, 2 * best + 1);
+      int eA = int(ex.z);
+      int eB = int(ex.w);
+      // z -> A z + B dc
+      int e1 = e + eA;
+      int e2 = eB + uE0;
+      int e3 = max(e1, e2);
+      w = ldexp2(cmul(ab.xy, w), e1 - e3) + ldexp2(cmul(ab.zw, delta), e2 - e3);
+      e = e3;
+      // dW/dc -> A dW/dc + B
+      e1 = eq + eA;
+      e3 = max(e1, eB);
+      q = ldexp2(cmul(ab.xy, q), e1 - e3) + ldexp2(ab.zw, eB - e3);
+      eq = e3;
+      v = cmul(ab.xy, v);
+      ev += eA;
+      m += bestLen;
+      n += bestLen;
+    } else {
+      // z -> 2 Z z + z^2 + dc
+      if (e >= -40) {
+        // |z| > 2^-60 while |dc| < 2^-90, so dc is below float32 precision
+        // and plain floats do
+        vec2 z = w * exp2(float(e));
+        w = cmul(2.0 * Z + z, z);
+        e = 0;
+      } else {
+        // each term at its own power of 2
+        int e3 = max(max(e, 2 * e), uE0);
+        w = ldexp2(2.0 * cmul(Z, w), e - e3) + ldexp2(cmul(w, w), 2 * e - e3) + ldexp2(delta, uE0 - e3);
+        e = e3;
+      }
+      // dW/dc -> 2 W dW/dc + 1, where the 1 only matters while dW/dc is small
+      int e1 = eW + eq;
+      if (e1 > 30) {
+        q = 2.0 * cmul(Ws, q);
+        eq = e1;
+      } else {
+        int e3 = max(e1, 0);
+        q = ldexp2(2.0 * cmul(Ws, q), e1 - e3) + vec2(exp2(float(-e3)), 0.0);
+        eq = e3;
+      }
+      if (n > 0) {
+        v = 2.0 * cmul(Ws, v);
+        ev += eW;
+      }
+      m++;
+      n++;
+    }
+    renorm(w, e);
+    renorm(q, eq);
+    renorm(v, ev);
+    Z = fetch(uRef, m).xy;
+  }
+  // dW/dc times the pixel spacing
+  vec2 d = ldexp2(q * uSigma, clamp(eq + uE0, -254, 254));
+  vec2 dn = q / max(abs(q.x), abs(q.y));
+#else
+  float scale = exp2(float(uE0));
+  vec2 dc = delta * scale;
+  float spacing = uSigma * scale;
+  vec2 z = vec2(0.0);
+  vec2 d = vec2(0.0); // dW/dc times the pixel spacing
+  vec2 v = vec2(1.0, 0.0); // dW/dW_1, for interior checks
   while (true) {
     W = Z + z;
-    if (dot(W, W) > ESCAPE_R2) { escaped = true; break; }
+    if (dot(W, W) > ESCAPE_R2) { result = 1; break; }
+    if (norm1(v) < exp2(INTERIOR_LOG2)) { result = 2; break; }
     if (n >= uMaxIter) break;
     if (m == uRefLen - 1 || norm1(W) < norm1(z)) {
       z = W;
@@ -205,41 +354,50 @@ void main() {
         int len = 2 << k;
         int j = (m - 1) >> (k + 1);
         if (k >= uLevels || ((m - 1) & (len - 1)) != 0 || j >= uBlaCount[k] || n + len > uMaxIter) break;
-        int e = uBlaOffset[k] + j;
-        if (!(az < fetch(uBla, 2 * e).x)) break;
-        best = e;
+        int b = uBlaOffset[k] + j;
+        if (!(az < fetch(uBla, 2 * b).x)) break;
+        best = b;
         bestLen = len;
       }
     }
     if (best >= 0) {
+      vec4 ex = fetch(uBla, 2 * best);
       vec4 ab = fetch(uBla, 2 * best + 1);
-      z = cmul(ab.xy, z) + cmul(ab.zw, dc);
-      d = cmul(ab.xy, d) + ab.zw * uSpacing;
+      vec2 A = ab.xy * exp2(ex.z);
+      vec2 B = ab.zw * exp2(ex.w);
+      z = cmul(A, z) + cmul(B, dc);
+      d = cmul(A, d) + B * spacing;
+      v = cmul(A, v);
       m += bestLen;
       n += bestLen;
     } else {
-      d = 2.0 * cmul(W, d) + vec2(uSpacing, 0.0);
+      d = 2.0 * cmul(W, d) + vec2(spacing, 0.0);
+      if (n > 0) v = 2.0 * cmul(W, v);
       z = cmul(2.0 * Z + z, z) + dc;
       m++;
       n++;
     }
     Z = fetch(uRef, m).xy;
   }
-  if (!escaped) { outData = vec4(-1.0, 0.0, 0.0, 0.0); return; }
+  vec2 dn = d / max(abs(d.x), abs(d.y));
+#endif
+  if (result != 1) { outData = vec4(result == 2 ? -1.0 : -2.0, 0.0, 0.0, 0.0); return; }
   float r = length(W);
   float mu = float(n) + 1.0 - log2(log(r));
   float dl = length(d);
   float de = dl > 0.0 ? 2.0 * r * log(r) / dl : 0.0;
-  vec2 dn = d / max(abs(d.x), abs(d.y));
   vec2 u = cmul(W / r, vec2(dn.x, -dn.y));
   u = dot(u, u) > 0.0 ? normalize(u) : vec2(0.0);
   outData = vec4(mu, de, u);
 }`;
+}
 
 // Colors the iteration data. Rows below uDoneY aren't rendered yet, so they
 // show the previous image, moved and scaled to the new view.
+const MAX_STOPS = 8;
 const COLOR = `#version 300 es
 precision highp float;
+#define MAX_STOPS ${MAX_STOPS}
 precision highp sampler2D;
 
 uniform sampler2D uData;
@@ -251,8 +409,13 @@ uniform float uOldScale;
 uniform vec2 uOldShift;
 uniform float uCycle;
 uniform float uHue;
-uniform bool uSlopes;
+uniform int uTransfer; // 0 linear, 1 square root, 2 log
+uniform vec3 uStops[MAX_STOPS]; // cyclic gradient; none means rainbow
+uniform int uStopCount;
+uniform float uSlopes; // slope shading strength, 0 for off
+uniform vec2 uLight; // light direction
 uniform bool uEdges;
+uniform vec3 uInside;
 
 out vec4 outColor;
 
@@ -276,12 +439,29 @@ void main() {
     }
     s = texelFetch(uOld, ivec2(p), 0);
   }
-  if (s.x < 0.0) { outColor = vec4(0.0, 0.0, 0.0, 1.0); return; }
-  float h = s.x / uCycle + uHue;
-  vec3 col = vec3(h2c(h + 1.0 / 3.0), h2c(h), h2c(h - 1.0 / 3.0));
-  if (uSlopes) {
-    float light = dot(s.zw, vec2(0.7071, 0.7071));
-    col *= 0.75 + 0.35 * light;
+  if (s.x < 0.0) { outColor = vec4(uInside, 1.0); return; }
+  // transfer functions as in KF: one color cycle at uCycle iterations, then
+  // the cycles get longer for square root and log
+  float h = uTransfer == 1 ? sqrt(s.x / uCycle)
+          : uTransfer == 2 ? log(1.0 + s.x) / log(1.0 + uCycle)
+          : s.x / uCycle;
+  h = fract(h + uHue);
+  vec3 col;
+  if (uStopCount == 0) {
+    col = vec3(h2c(h + 1.0 / 3.0), h2c(h), h2c(h - 1.0 / 3.0));
+  } else {
+    float x = h * float(uStopCount);
+    int i = int(x);
+    vec3 a = uStops[0], b = uStops[0];
+    for (int k = 0; k < MAX_STOPS; k++) {
+      if (k == i) a = uStops[k];
+      if (k == (i + 1) % uStopCount) b = uStops[k];
+    }
+    col = mix(a, b, smoothstep(0.0, 1.0, fract(x)));
+  }
+  if (uSlopes > 0.0) {
+    float light = dot(s.zw, uLight);
+    col *= max(0.0, 1.0 + uSlopes * (0.35 * light - 0.25));
   }
   if (uEdges) col *= mix(0.15, 1.0, smoothstep(0.0, 1.0, s.y));
   outColor = vec4(col, 1.0);
@@ -312,7 +492,8 @@ function program(fragment) {
   return { program: p, uniforms };
 }
 
-const iterate = program(ITERATE);
+const iterateFast = program(iterateSource(false));
+const iterateDeep = program(iterateSource(true));
 const color = program(COLOR);
 gl.bindVertexArray(gl.createVertexArray());
 
@@ -434,6 +615,16 @@ worker.onerror = (e) => {
   setStatus(`Reference orbit failed: ${e.message}`);
 };
 
+// (x + iy) as (mantissa, exponent) with the larger part in [0.5, 1).
+// Overflowed values become 0; their R is 0, so the step is never taken.
+function splitExponent(x, y) {
+  const m = Math.max(Math.abs(x), Math.abs(y));
+  if (m === 0 || !Number.isFinite(m)) return [0, 0, 0];
+  const e = Math.floor(Math.log2(m)) + 1;
+  const s = 2 ** -e;
+  return [x * s, y * s, e];
+}
+
 // BLA steps z -> A z + B dc, valid while |z| < R (mathr, "Deep zoom theory
 // and practice (again)", 2022). Level k holds steps of 2^(k+1) iterations
 // starting at iterations 1, 1 + 2^(k+1), ...; single steps aren't stored,
@@ -471,7 +662,7 @@ function buildBla(orbit, cMax) {
       B2[2 * j] = ayr * bxr - ayi * bxi + B[2 * y];
       B2[2 * j + 1] = ayr * bxi + ayi * bxr + B[2 * y + 1];
       const r = Math.min(R[x], Math.max(0, (R[y] - Math.hypot(bxr, bxi) * cMax) / Math.hypot(axr, axi)));
-      R2[j] = Number.isFinite(r) ? r : 0;
+      R2[j] = Number.isFinite(r) ? r : 0; // A overflowed: never use this step
     }
     A = A2;
     B = B2;
@@ -481,6 +672,8 @@ function buildBla(orbit, cMax) {
   }
 
   const total = levels.reduce((sum, l) => sum + l.count, 0);
+  // Two texels per step: [R, log2 R, exponent of A, exponent of B] and the
+  // mantissas [A, B], so A and B keep their size past float32's range.
   const packed = new Float32Array(8 * Math.max(total, 1));
   const offsets = [];
   const counts = [];
@@ -489,8 +682,10 @@ function buildBla(orbit, cMax) {
     offsets.push(e);
     counts.push(level.count);
     for (let j = 0; j < level.count; j++, e++) {
-      packed[8 * e] = level.R[j];
-      packed.set([level.A[2 * j], level.A[2 * j + 1], level.B[2 * j], level.B[2 * j + 1]], 8 * e + 4);
+      const r = level.R[j];
+      const [ar, ai, eA] = splitExponent(level.A[2 * j], level.A[2 * j + 1]);
+      const [br, bi, eB] = splitExponent(level.B[2 * j], level.B[2 * j + 1]);
+      packed.set([r, r > 0 ? Math.log2(r) : -1e38, eA, eB, ar, ai, br, bi], 8 * e);
     }
   }
   blaTexture = tableTexture(blaTexture, packed, 4);
@@ -539,6 +734,7 @@ function drawTile() {
   const { target } = job;
   const y0 = Math.max(0, job.doneY - job.tileH);
   const w = Math.min(job.tileW, canvas.width - job.x);
+  const iterate = job.spacing < DEEP_SPACING ? iterateDeep : iterateFast;
   const u = iterate.uniforms;
   gl.bindFramebuffer(gl.FRAMEBUFFER, target.fbo);
   gl.viewport(0, 0, canvas.width, canvas.height);
@@ -557,8 +753,12 @@ function drawTile() {
   const pad = (a) => Int32Array.from({ length: MAX_LEVELS }, (_, i) => a[i] ?? 0);
   gl.uniform1iv(u.uBlaOffset, pad(blaLevels.offsets));
   gl.uniform1iv(u.uBlaCount, pad(blaLevels.counts));
-  gl.uniform2f(u.uOffset, job.offset[0], job.offset[1]);
-  gl.uniform1f(u.uSpacing, job.spacing);
+  // spacing = sigma 2^E0 with sigma in [1, 2); the offset is in the same units
+  const e0 = Math.floor(Math.log2(job.spacing));
+  const toUnits = (x) => x * 2 ** -(e0 >> 1) * 2 ** -(e0 - (e0 >> 1));
+  gl.uniform1i(u.uE0, e0);
+  gl.uniform1f(u.uSigma, toUnits(job.spacing));
+  gl.uniform2f(u.uOffsetPx, toUnits(job.offset[0]), toUnits(job.offset[1]));
   gl.uniform2f(u.uHalfRes, canvas.width / 2, canvas.height / 2);
   gl.drawArrays(gl.TRIANGLES, 0, 3);
   gl.disable(gl.SCISSOR_TEST);
@@ -632,11 +832,33 @@ function drawColors() {
       toNum(rescale(view.im, view.bits, bits) - rescale(v.im, v.bits, bits), bits) / s
     );
   }
+  const stops = PALETTES[controls.palette.value];
+  const angle = (Number(controls.angle.value) * Math.PI) / 180;
   gl.uniform1f(u.uCycle, Number(controls.cycle.value));
   gl.uniform1f(u.uHue, Number(controls.hue.value));
-  gl.uniform1i(u.uSlopes, controls.slopes.checked ? 1 : 0);
+  gl.uniform1i(u.uTransfer, Number(controls.transfer.value));
+  gl.uniform1i(u.uStopCount, stops.length);
+  if (stops.length) gl.uniform3fv(u.uStops, stops.flatMap(hexColor));
+  gl.uniform1f(u.uSlopes, Number(controls.slopes.value));
+  gl.uniform2f(u.uLight, Math.cos(angle), Math.sin(angle));
   gl.uniform1i(u.uEdges, controls.edges.checked ? 1 : 0);
+  gl.uniform3fv(u.uInside, hexColor(controls.inside.value));
   gl.drawArrays(gl.TRIANGLES, 0, 3);
+}
+
+// Cyclic gradients, light to dark and back; [] is the HSV rainbow.
+const PALETTES = {
+  rainbow: [],
+  fire: ["#000000", "#5c0a00", "#d43a00", "#ff9e1f", "#fff3c4", "#ff9e1f", "#d43a00", "#5c0a00"],
+  ocean: ["#020b2a", "#0b3b8c", "#2aa7c9", "#e6f7ff", "#f2c14e", "#2aa7c9", "#0b3b8c"],
+  ice: ["#000814", "#1d3557", "#a8dadc", "#ffffff", "#a8dadc", "#1d3557"],
+  sunset: ["#1a0533", "#6b1d5c", "#c43c5c", "#f28d52", "#fde3a7", "#f28d52", "#c43c5c", "#6b1d5c"],
+  gray: ["#000000", "#ffffff"],
+};
+
+function hexColor(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
 }
 
 let frameScheduled = false;
@@ -684,8 +906,13 @@ const controls = {
   iterationsValue: document.getElementById("iterations-value"),
   cycle: document.getElementById("cycle"),
   hue: document.getElementById("hue"),
+  palette: document.getElementById("palette"),
+  transfer: document.getElementById("transfer"),
   slopes: document.getElementById("slopes"),
+  angle: document.getElementById("angle"),
   edges: document.getElementById("edges"),
+  inside: document.getElementById("inside"),
+  resolution: document.getElementById("resolution"),
 };
 const info = {
   center: document.getElementById("center"),
@@ -709,7 +936,7 @@ function showInfo(ms) {
   info.zoom.textContent = `${(HOME.radius / view.radius).toExponential(2)}×`;
   info.reference.textContent =
     reference.period > 0 ? `Minibrot nucleus, period ${reference.period.toLocaleString()}` : "View center (no nucleus found)";
-  const limit = view.radius <= clampRadius(0) * 1.0001 ? " · deepest zoom float32 allows" : "";
+  const limit = view.radius <= clampRadius(0) * 1.0001 ? " · deepest zoom supported" : "";
   setStatus(`Rendered in ${(ms / 1000).toFixed(2)} s${limit}`);
 }
 
@@ -721,7 +948,16 @@ function setIterations(value) {
 }
 
 controls.iterations.addEventListener("input", () => setIterations(10 ** Number(controls.iterations.value)));
-for (const c of [controls.cycle, controls.hue, controls.slopes, controls.edges]) {
+for (const c of [
+  controls.cycle,
+  controls.hue,
+  controls.palette,
+  controls.transfer,
+  controls.slopes,
+  controls.angle,
+  controls.edges,
+  controls.inside,
+]) {
   c.addEventListener("input", () => {
     dirty = true;
     scheduleFrame();
@@ -825,7 +1061,12 @@ function showCursor([x, y]) {
     gl.bindFramebuffer(gl.FRAMEBUFFER, finished.fbo);
     gl.readPixels(Math.floor(x), canvas.height - 1 - Math.floor(y), 1, 1, gl.RGBA, gl.FLOAT, px);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    iterations = px[0] < 0 ? "\ninside (no escape)" : `\n${Math.floor(px[0]).toLocaleString()} iterations`;
+    iterations =
+      px[0] === -1
+        ? "\ninside"
+        : px[0] < 0
+          ? "\nno escape within the iteration limit"
+          : `\n${Math.floor(px[0]).toLocaleString()} iterations`;
   }
   info.cursor.textContent = `${formatDecimal(re, view.bits, d)}\n${formatDecimal(im, view.bits, d)}i${iterations}`;
 }
@@ -866,7 +1107,7 @@ function loadHash() {
 }
 
 function resize() {
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const dpr = Math.min(window.devicePixelRatio || 1, 2) * Number(controls.resolution.value);
   const width = Math.round(canvas.clientWidth * dpr);
   const height = Math.round(canvas.clientHeight * dpr);
   if (width === canvas.width && height === canvas.height && targets.length) return;
@@ -882,6 +1123,7 @@ function resize() {
 
 if (window.innerWidth < 600) document.getElementById("panel").classList.add("collapsed");
 window.addEventListener("resize", resize);
+controls.resolution.addEventListener("input", resize);
 window.addEventListener("hashchange", () => {
   loadHash();
   viewChanged();

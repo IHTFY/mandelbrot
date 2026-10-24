@@ -22,8 +22,13 @@ The methods follow [Kalles Fraktaler](https://mathr.co.uk/kf/kf.html) and [Frakt
 - **Rebasing.** When a pixel's orbit $Z + z$ passes closer to 0 than to the reference, the pixel restarts the reference from the beginning with $z = Z + z$. This removes the "glitches" perturbation used to suffer from without detecting and re-rendering them.
 - **Bilinear approximation.** While z is small, many iterations collapse into one step $z \to A z + B\,dc$, with A and B precomputed from the reference orbit. This skips most of the work at deep zooms.
 - **Distance estimation and slope shading** come from tracking the derivative along with z.
+- **Scaled iterations.** Past a zoom of about $10^{30}$, z gets too small for 32-bit floats. The deep shader then stores z as a float times a separate power of 2, and so does the derivative, as KF's "floatexp" numbers do. Once z is large enough, it switches back to plain floats.
+- **Interior detection.** The renderer tracks how much the orbit shrinks small changes in its start. A pixel whose orbit is pulled into an attracting cycle is inside the set and stops early instead of running to the iteration limit, which makes views with a lot of black much faster.
+
+## Colors
+Coloring follows KF's options: a palette (a cyclic gradient or the rainbow), the spacing of color cycles (linear, square root, or log in the iteration count), the cycle length and offset, slope shading strength and light angle, darkened edges from the distance estimate, and the inside color. "Half" resolution renders a quarter of the pixels, for slow devices.
 
 ## Limits
-32-bit floats bottom out near $10^{-38}$, so zooming stops at a pixel size of about $10^{-34}$ (a zoom of roughly $10^{31}$). Going deeper would need the floating-point rescaling tricks KF uses for its deepest zooms.
+The view size and the reference search use JavaScript doubles, which bottom out near $10^{-308}$, so zooming stops at a pixel size of $10^{-290}$ (a zoom of roughly $10^{288}$). The deep shader is a few times slower per iteration than the plain one, and the reference orbit takes longer as the coordinates get more digits.
 
 The viewer needs WebGL2 with float render targets, which current desktop and mobile browsers have.
