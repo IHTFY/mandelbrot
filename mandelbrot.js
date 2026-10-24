@@ -366,6 +366,7 @@ const worker = new Worker("reference-worker.js");
 let workerBusy = false;
 let requestId = 0;
 let pendingSize = false;
+let sizeRequestVersion = 0; // a minibrot found after navigating away is dropped
 
 function referenceOffset() {
   const bits = Math.max(view.bits, reference.bits);
@@ -393,6 +394,7 @@ function requestReference(wantSize = false) {
   ensureBits();
   workerBusy = true;
   pendingSize = wantSize;
+  sizeRequestVersion = viewVersion;
   worker.postMessage({
     id: ++requestId,
     re: view.re,
@@ -410,6 +412,7 @@ worker.onmessage = ({ data }) => {
   workerBusy = false;
   const wasSizeRequest = pendingSize;
   pendingSize = false;
+  if (wasSizeRequest && sizeRequestVersion !== viewVersion) return;
   if (wasSizeRequest && data.size === 0) {
     setStatus("No minibrot found here. Try more iterations.");
     return;
@@ -799,7 +802,7 @@ canvas.addEventListener("pointerup", (e) => {
 });
 canvas.addEventListener("pointercancel", (e) => {
   pointers.delete(e.pointerId);
-  gesture = null;
+  if (pointers.size === 0) gesture = null;
 });
 canvas.addEventListener(
   "wheel",

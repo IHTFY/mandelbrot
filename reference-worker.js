@@ -64,6 +64,8 @@ function nucleus(cr, ci, bits, period, tolerance, maxStep) {
       const u = ((zr * zr - zi * zi) >> F) + cr;
       zi = ((zr * zi) >> (F - 1n)) + ci;
       zr = u;
+      // an escaping orbit doubles its digits every step until memory runs out
+      if (x * x + y * y > ESCAPE_R2) return null;
     }
     // delta = z / dz, scaled first so |dz|^2 can't overflow
     const s = Math.max(Math.abs(dr), Math.abs(di));
