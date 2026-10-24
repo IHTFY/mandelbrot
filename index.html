@@ -34,6 +34,34 @@
         touch-action: none;
         cursor: crosshair;
       }
+      /* The ad on the right edge, wide windows only (ads.js shows it and adds its
+         box). The canvas keeps at least 1000 px: 1000 + 150 px to the ad + the
+         ad + 16 px to the window's edge, so 300 px wide from 1466 px and 160 px
+         from 1326 px, and both need a window 700 px tall. These match
+         PLAY_AD_SIZES in ads.js. */
+      #rail:not([hidden]) {
+        position: fixed;
+        top: 16px;
+        right: 16px;
+        display: grid;
+        grid-template-columns: min-content;
+        gap: 6px;
+        color: #9a9ab0;
+        font-size: 12px;
+      }
+      #rail a {
+        color: inherit;
+      }
+      @media (min-width: 1326px) and (min-height: 700px) {
+        body:has(#rail:not([hidden])) #canvas {
+          width: calc(100% - 326px);
+        }
+      }
+      @media (min-width: 1466px) and (min-height: 700px) {
+        body:has(#rail:not([hidden])) #canvas {
+          width: calc(100% - 466px);
+        }
+      }
       #panel {
         position: fixed;
         top: max(8px, env(safe-area-inset-top));
@@ -140,10 +168,21 @@
         font-size: 12px;
         color: #9a9ab0;
       }
+      .support {
+        display: block;
+        margin-top: 10px;
+        text-align: center;
+        color: #9a9ab0;
+      }
     </style>
   </head>
   <body>
     <canvas id="canvas"></canvas>
+    <!-- The ad on the right edge, on wide windows only: ads.js shows it and adds its box. -->
+    <aside id="rail" hidden>
+      <small>Advertisements</small>
+      <a href="https://ihtfy.com/privacy" target="_blank" rel="noopener">Privacy</a>
+    </aside>
     <div id="panel">
       <button id="toggle-panel" aria-label="Show or hide the panel">☰</button>
       <h2>Center</h2>
@@ -205,6 +244,7 @@
       <h2>Pointer</h2>
       <pre id="cursor"></pre>
       <div class="hint">Click to zoom in, right-click to zoom out, drag to pan, scroll or pinch to zoom.</div>
+      <a class="support" href="https://ihtfy.com/support/" target="_blank" rel="noopener">Support ♥</a>
     </div>
   </body>
 </html>

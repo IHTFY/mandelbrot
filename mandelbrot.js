@@ -1120,6 +1120,8 @@ function resize() {
 
 if (window.innerWidth < 600) document.getElementById("panel").classList.add("collapsed");
 window.addEventListener("resize", resize);
+// The canvas also changes size when the ad strip appears or goes away.
+new ResizeObserver(resize).observe(canvas);
 controls.resolution.addEventListener("input", resize);
 window.addEventListener("hashchange", () => {
   loadHash();
@@ -1127,3 +1129,10 @@ window.addEventListener("hashchange", () => {
 });
 loadHash();
 resize();
+
+// A returning ad-free buyer gets the loader now, so it can hide the ad box before it shows.
+// Everyone else gets the ad on the right edge of a wide window.
+import("./ads.js").then(({ loadForBuyer, startRail }) => {
+  loadForBuyer();
+  startRail(document.getElementById("rail"));
+});
