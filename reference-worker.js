@@ -205,7 +205,8 @@ function orbit(cr, ci, bits, n) {
 }
 
 self.onmessage = ({ data }) => {
-  const { id, re, im, bits, radius, spacing, maxIter, wantSize } = data;
+  const { id, re, im, radius, spacing, maxIter, wantSize } = data;
+  let { bits } = data;
   const tolerance = spacing * 1e-6;
   let size = 0;
   // A minibrot to zoom to must be smaller than the view, or the button would
@@ -221,9 +222,23 @@ self.onmessage = ({ data }) => {
     self.postMessage({ id, size: 0 });
     return;
   }
-  const cr = found ? found.cr : re;
-  const ci = found ? found.ci : im;
-  const period = found ? found.period : 0;
+  let cr = found ? found.cr : re;
+  let ci = found ? found.ci : im;
+  let period = found ? found.period : 0;
+  // The nucleus is only as precise as this view, which can be far coarser
+  // than the minibrot the page zooms to: solve it again with bits and a
+  // tolerance scaled down by size / radius.
+  if (wantSize) {
+    const extra = Math.ceil(Math.log2(radius / size)) + 2;
+    const shift = BigInt(extra);
+    const fineTolerance = tolerance * (size / radius);
+    const fine = nucleus(cr << shift, ci << shift, bits + extra, period, fineTolerance, spacing);
+    // if Newton fails here, the coarser nucleus still beats none
+    if (fine) {
+      ({ cr, ci, period } = fine);
+      bits += extra;
+    }
+  }
   const { values, escaped } = orbit(cr, ci, bits, period || maxIter);
   self.postMessage(
     { id, re: cr, im: ci, bits, radius, period, maxIter, orbit: values, escaped, size },
