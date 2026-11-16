@@ -796,7 +796,7 @@ function advanceJob() {
     if (strip) {
       job.x = 0;
       job.doneY = job.pending.y0;
-      setStatus(`Rendering… ${Math.round(100 * (1 - job.doneY / canvas.height))}%`);
+      setStatus(`Rendering… ${Math.round(100 * (1 - job.doneY / canvas.height))}%`, true);
     } else {
       job.x = job.pending.x;
     }
@@ -893,13 +893,13 @@ function frame() {
     job = null;
   }
   if (!job && finished?.view && sameView(finished.view) && finished.maxIter === maxIter) {
-    // The view is back on the finished image, so drop a stale "Rendering…" status.
-    showInfo(finishedMs);
+    // The view is back on the finished image, so drop a stale "Rendering…" status (and only that one).
+    if (statusIsProgress) showInfo(finishedMs);
   } else if (!job) {
     if (referenceUsable()) {
       startJob();
       job.target.maxIter = maxIter;
-      setStatus("Rendering…");
+      setStatus("Rendering…", true);
     } else if (!workerBusy && failedVersion !== viewVersion) {
       requestReference();
     }
@@ -940,8 +940,11 @@ const info = {
   cursor: document.getElementById("cursor"),
 };
 
-function setStatus(text) {
+let statusIsProgress = false; // the status line shows render progress, not a search or error message
+
+function setStatus(text, progress = false) {
   info.status.textContent = text;
+  statusIsProgress = progress;
 }
 
 function digits() {
