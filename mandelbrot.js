@@ -714,6 +714,7 @@ function buildBla(orbit, cMax) {
 
 let job = null; // the render in progress
 let finished = null; // target holding the last finished image
+let finishedMs = 0; // how long that image took
 let dirty = true;
 let viewVersion = 0;
 
@@ -811,9 +812,9 @@ function advanceJob() {
   }
   if (job.doneY <= 0) {
     finished = job.target;
-    const ms = performance.now() - job.started;
+    finishedMs = performance.now() - job.started;
     job = null;
-    showInfo(ms);
+    showInfo(finishedMs);
     return;
   }
   drawTile();
@@ -892,7 +893,8 @@ function frame() {
     job = null;
   }
   if (!job && finished?.view && sameView(finished.view) && finished.maxIter === maxIter) {
-    // nothing to render
+    // The view is back on the finished image, so drop a stale "Rendering…" status.
+    showInfo(finishedMs);
   } else if (!job) {
     if (referenceUsable()) {
       startJob();
@@ -1020,7 +1022,8 @@ canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 canvas.addEventListener("pointerdown", (e) => {
   canvas.setPointerCapture(e.pointerId);
   pointers.set(e.pointerId, canvasPoint(e));
-  gesture = { moved: false, button: e.button, start: canvasPoint(e) };
+  // A second finger makes this a pinch, so lifting the fingers is not a tap.
+  gesture = { moved: pointers.size > 1, button: e.button, start: canvasPoint(e) };
 });
 canvas.addEventListener("pointermove", (e) => {
   const p = canvasPoint(e);
