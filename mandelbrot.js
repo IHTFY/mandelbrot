@@ -234,13 +234,14 @@ void main() {
   vec2 w = vec2(0.0); int e = uE0;   // z = w 2^e
   vec2 q = vec2(0.0); int eq = 0;    // dW/dc = q 2^eq
   vec2 v = vec2(1.0, 0.0); int ev = 0; // dW/dW_1 = v 2^ev, for interior checks
+  int eZ = 0; // the reference value is Z 2^eZ, so tiny ones keep their size
   while (true) {
-    W = Z + w * exp2(float(e));
+    W = Z * exp2(float(eZ)) + w * exp2(float(e));
     if (dot(W, W) > ESCAPE_R2) { result = 1; break; }
     if (ev < 0 && log2(norm1(v)) + float(ev) < interiorLog2) { result = 2; break; }
     if (n >= uMaxIter) break;
     // W = Ws 2^eW. While z is tiny, W is scaled too when Z is 0 or no
-    // bigger than about z (then Z >= 2^-149 keeps ldexp2 in range); only
+    // bigger than about z (then eZ - e <= 41 keeps ldexp2 in range); only
     // then can W be smaller than z, so only then is a rebase possible.
     // Ws is renormalized so the products with q and v below can't underflow.
     vec2 Ws = W; int eW = 0;
@@ -250,8 +251,8 @@ void main() {
     } else if (Z == vec2(0.0)) {
       Ws = w;
       eW = e;
-    } else if (norm1(Z) <= exp2(float(e + 40))) {
-      Ws = ldexp2(Z, -e) + w;
+    } else if (norm1(Z) <= exp2(float(e + 40 - eZ))) {
+      Ws = ldexp2(Z, eZ - e) + w;
       eW = e;
       rebase = norm1(Ws) < norm1(w);
     }
@@ -260,6 +261,7 @@ void main() {
       w = Ws;
       e = eW;
       Z = vec2(0.0);
+      eZ = 0;
       m = 0;
     }
     int best = -1;
@@ -302,12 +304,14 @@ void main() {
         // |z| > 2^-60, so plain floats do; dc may still matter when Z is
         // near 0, and underflows to 0 when it doesn't
         vec2 z = w * exp2(float(e));
-        w = cmul(2.0 * Z + z, z) + ldexp2(delta, uE0);
+        w = cmul(2.0 * Z * exp2(float(eZ)) + z, z) + ldexp2(delta, uE0);
         e = 0;
       } else {
-        // each term at its own power of 2
-        int e3 = max(e, uE0); // e < 0, so z^2 is smaller than z
-        w = ldexp2(2.0 * cmul(Z, w), e - e3) + ldexp2(cmul(w, w), 2 * e - e3) + ldexp2(delta, uE0 - e3);
+        // each term at its own power of 2, and the sum at the largest of
+        // them: right after a wrap Z is 0 and z^2 + dc is far smaller than z
+        int e2 = Z == vec2(0.0) ? 2 * e : eZ + e + 1;
+        int e3 = max(e2, max(2 * e, uE0));
+        w = ldexp2(2.0 * cmul(Z, w), eZ + e - e3) + ldexp2(cmul(w, w), 2 * e - e3) + ldexp2(delta, uE0 - e3);
         e = e3;
       }
       // dW/dc -> 2 W dW/dc + 1
@@ -325,7 +329,9 @@ void main() {
     renorm(w, e);
     renorm(q, eq);
     renorm(v, ev);
-    Z = fetch(uRef, m).xy;
+    vec4 t = fetch(uRef, m);
+    Z = t.xy;
+    eZ = int(t.z);
   }
   // dW/dc times the pixel spacing
   vec2 d = ldexp2(q * uSigma, clamp(eq + uE0, -254, 254));
@@ -378,7 +384,8 @@ void main() {
       m++;
       n++;
     }
-    Z = fetch(uRef, m).xy;
+    vec4 t = fetch(uRef, m);
+    Z = t.xy * exp2(t.z);
   }
   vec2 dn = d / max(abs(d.x), abs(d.y));
 #endif
@@ -505,16 +512,14 @@ function dataTexture(internal, format, width, height, data) {
   return t;
 }
 
-// Uploads `texels` RGBA or RG float texels laid out TEX_WIDTH per row.
-function tableTexture(old, values, channels) {
+// Uploads RGBA float texels laid out TEX_WIDTH per row.
+function tableTexture(old, values) {
   if (old) gl.deleteTexture(old);
-  const texels = Math.max(1, values.length / channels);
+  const texels = Math.max(1, values.length / 4);
   const height = Math.ceil(texels / TEX_WIDTH);
-  const padded = new Float32Array(TEX_WIDTH * height * channels);
+  const padded = new Float32Array(TEX_WIDTH * height * 4);
   padded.set(values);
-  return channels === 4
-    ? dataTexture(gl.RGBA32F, gl.RGBA, TEX_WIDTH, height, padded)
-    : dataTexture(gl.RG32F, gl.RG, TEX_WIDTH, height, padded);
+  return dataTexture(gl.RGBA32F, gl.RGBA, TEX_WIDTH, height, padded);
 }
 
 // Two render targets: the one being rendered and the last finished image.
@@ -596,7 +601,7 @@ worker.onmessage = ({ data }) => {
     return;
   }
   if (reference) gl.deleteTexture(reference.texture);
-  reference = { ...data, texture: tableTexture(null, new Float32Array(data.orbit), 2) };
+  reference = { ...data, texture: tableTexture(null, referenceTexels(data.orbit)) };
   if (wasSizeRequest) {
     setCenter(data.re, data.im, data.bits);
     view.radius = clampRadius(data.size * 1.5);
@@ -614,12 +619,26 @@ worker.onerror = (e) => {
 
 // (x + iy) as (mantissa, exponent) with the larger part in [0.5, 1).
 // Overflowed values become 0; their R is 0, so the step is never taken.
+// The scale is applied in two halves, since 2^-e alone overflows for
+// denormal doubles.
 function splitExponent(x, y) {
   const m = Math.max(Math.abs(x), Math.abs(y));
   if (m === 0 || !Number.isFinite(m)) return [0, 0, 0];
   const e = Math.floor(Math.log2(m)) + 1;
-  const s = 2 ** -e;
-  return [x * s, y * s, e];
+  const h = 2 ** -(e >> 1);
+  const l = 2 ** -(e - (e >> 1));
+  return [x * h * l, y * h * l, e];
+}
+
+// The reference orbit as RGBA texels (mantissa, exponent, 0), so values
+// below float32's range, which the orbit reaches near small minibrots,
+// keep their size instead of becoming 0.
+function referenceTexels(orbit) {
+  const texels = new Float32Array(2 * orbit.length);
+  for (let i = 0; i < orbit.length / 2; i++) {
+    texels.set(splitExponent(orbit[2 * i], orbit[2 * i + 1]), 4 * i);
+  }
+  return texels;
 }
 
 // BLA steps z -> A z + B dc, valid while |z| < R (mathr, "Deep zoom theory
@@ -685,7 +704,7 @@ function buildBla(orbit, cMax) {
       packed.set([r, r > 0 ? Math.log2(r) : -1e38, eA, eB, ar, ai, br, bi], 8 * e);
     }
   }
-  blaTexture = tableTexture(blaTexture, packed, 4);
+  blaTexture = tableTexture(blaTexture, packed);
   blaLevels = { offsets, counts };
 }
 
