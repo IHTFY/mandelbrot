@@ -714,6 +714,7 @@ function buildBla(orbit, cMax) {
 
 let job = null; // the render in progress
 let finished = null; // target holding the last finished image
+let finishedMs = 0; // how long that image took
 let dirty = true;
 let viewVersion = 0;
 
@@ -795,7 +796,7 @@ function advanceJob() {
     if (strip) {
       job.x = 0;
       job.doneY = job.pending.y0;
-      setStatus(`Rendering… ${Math.round(100 * (1 - job.doneY / canvas.height))}%`);
+      setStatus(`Rendering… ${Math.round(100 * (1 - job.doneY / canvas.height))}%`, true);
     } else {
       job.x = job.pending.x;
     }
@@ -811,9 +812,9 @@ function advanceJob() {
   }
   if (job.doneY <= 0) {
     finished = job.target;
-    const ms = performance.now() - job.started;
+    finishedMs = performance.now() - job.started;
     job = null;
-    showInfo(ms);
+    showInfo(finishedMs);
     return;
   }
   drawTile();
@@ -892,12 +893,13 @@ function frame() {
     job = null;
   }
   if (!job && finished?.view && sameView(finished.view) && finished.maxIter === maxIter) {
-    // nothing to render
+    // The view is back on the finished image, so drop a stale "Rendering…" status (and only that one).
+    if (statusIsProgress) showInfo(finishedMs);
   } else if (!job) {
     if (referenceUsable()) {
       startJob();
       job.target.maxIter = maxIter;
-      setStatus("Rendering…");
+      setStatus("Rendering…", true);
     } else if (!workerBusy && failedVersion !== viewVersion) {
       requestReference();
     }
@@ -938,8 +940,11 @@ const info = {
   cursor: document.getElementById("cursor"),
 };
 
-function setStatus(text) {
+let statusIsProgress = false; // the status line shows render progress, not a search or error message
+
+function setStatus(text, progress = false) {
   info.status.textContent = text;
+  statusIsProgress = progress;
 }
 
 function digits() {
@@ -1020,7 +1025,8 @@ canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 canvas.addEventListener("pointerdown", (e) => {
   canvas.setPointerCapture(e.pointerId);
   pointers.set(e.pointerId, canvasPoint(e));
-  gesture = { moved: false, button: e.button, start: canvasPoint(e) };
+  // A second finger makes this a pinch, so lifting the fingers is not a tap.
+  gesture = { moved: pointers.size > 1, button: e.button, start: canvasPoint(e) };
 });
 canvas.addEventListener("pointermove", (e) => {
   const p = canvasPoint(e);
