@@ -963,9 +963,10 @@ function showInfo(ms) {
 }
 
 // The slider is logarithmic, so its value is the exponent; the count is its text value.
+// The text value carries the unit because Chrome on Android reads it in place of the name.
 function showIterations() {
   controls.iterations.value = Math.log10(maxIter);
-  controls.iterations.setAttribute("aria-valuetext", maxIter.toLocaleString());
+  controls.iterations.setAttribute("aria-valuetext", `${maxIter.toLocaleString()} iterations`);
   controls.iterationsValue.textContent = maxIter.toLocaleString();
 }
 
