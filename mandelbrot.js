@@ -962,10 +962,16 @@ function showInfo(ms) {
   setStatus(`Rendered in ${(ms / 1000).toFixed(2)} s${limit}`);
 }
 
+// The slider is logarithmic, so its value is the exponent; the count is its text value.
+function showIterations() {
+  controls.iterations.value = Math.log10(maxIter);
+  controls.iterations.setAttribute("aria-valuetext", maxIter.toLocaleString());
+  controls.iterationsValue.textContent = maxIter.toLocaleString();
+}
+
 function setIterations(value) {
   maxIter = Math.round(Math.min(1e6, Math.max(10, value)));
-  controls.iterations.value = Math.log10(maxIter);
-  controls.iterationsValue.textContent = maxIter.toLocaleString();
+  showIterations();
   viewChanged();
 }
 
@@ -1041,7 +1047,15 @@ canvas.addEventListener("pointermove", (e) => {
     const after = Math.hypot(p[0] - other[0], p[1] - other[1]);
     gesture.moved = true;
     pointers.set(e.pointerId, p);
-    if (before > 0 && after > 0) zoomAt((p[0] + other[0]) / 2, (p[1] + other[1]) / 2, before / after);
+    // The point under the old midpoint ends up under the new one, zoomed by
+    // the change in finger distance.
+    const factor = before > 0 && after > 0 ? before / after : 1;
+    const dx = (p[0] - prev[0]) / 2;
+    const dy = (p[1] - prev[1]) / 2;
+    zoomAt((prev[0] + other[0]) / 2, (prev[1] + other[1]) / 2, factor);
+    const s = spacingOf(view.radius);
+    moveCenter(-dx * s, dy * s);
+    viewChanged();
     return;
   }
   if (!gesture.moved && Math.hypot(p[0] - gesture.start[0], p[1] - gesture.start[1]) < 6) return;
@@ -1125,8 +1139,7 @@ function loadHash() {
   }
   const it = Number(params.get("it"));
   maxIter = it >= 10 ? Math.min(1e6, Math.round(it)) : maxIter;
-  controls.iterations.value = Math.log10(maxIter);
-  controls.iterationsValue.textContent = maxIter.toLocaleString();
+  showIterations();
 }
 
 function resize() {
