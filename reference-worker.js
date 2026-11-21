@@ -205,7 +205,7 @@ function orbit(cr, ci, bits, n) {
 }
 
 self.onmessage = ({ data }) => {
-  const { id, re, im, radius, spacing, maxIter, wantSize } = data;
+  const { id, re, im, radius, spacing, minRadius, maxIter, wantSize } = data;
   let { bits } = data;
   const tolerance = spacing * 1e-6;
   let size = 0;
@@ -226,17 +226,22 @@ self.onmessage = ({ data }) => {
   let ci = found ? found.ci : im;
   let period = found ? found.period : 0;
   // The nucleus is only as precise as this view, which can be far coarser
-  // than the minibrot the page zooms to: solve it again with bits and a
-  // tolerance scaled down by size / radius.
+  // than the minibrot the page zooms to: solve it again for the view the page
+  // will show, whose radius is the page's (size * 1.5, no smaller than
+  // minRadius). That view sets the bits and the tolerance, so repeated zooms
+  // never add more than it needs.
   if (wantSize) {
-    const extra = Math.ceil(Math.log2(radius / size)) + 2;
+    const destRadius = Math.max(size * 1.5, minRadius);
+    // the ratio first: spacing * destRadius alone underflows at the deepest zoom
+    const destSpacing = spacing * (destRadius / (2 * radius));
+    const targetBits = Math.max(bits, Math.ceil(-Math.log2(destSpacing)) + 64);
+    const extra = targetBits - bits;
     const shift = BigInt(extra);
-    const fineTolerance = tolerance * (size / radius);
-    const fine = nucleus(cr << shift, ci << shift, bits + extra, period, fineTolerance, spacing);
+    const fine = nucleus(cr << shift, ci << shift, targetBits, period, destSpacing * 1e-6, spacing);
     // if Newton fails here, the coarser nucleus still beats none
     if (fine) {
       ({ cr, ci, period } = fine);
-      bits += extra;
+      bits = targetBits;
     }
   }
   const { values, escaped } = orbit(cr, ci, bits, period || maxIter);

@@ -585,6 +585,7 @@ function requestReference(wantSize = false) {
     bits: view.bits,
     radius: wantSize ? view.radius * 0.5 : view.radius,
     spacing: spacingOf(view.radius),
+    minRadius: clampRadius(0),
     maxIter,
     wantSize,
   });
