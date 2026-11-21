@@ -6,6 +6,8 @@ import { beforeEach, test } from 'node:test';
 let added;
 let shown;
 let online = true;
+// The loader's purchase check: resolves it with true for a buyer, false otherwise.
+let finishCheck;
 
 const storage = new Map();
 let storageReadable = true;
@@ -92,7 +94,10 @@ beforeEach(() => {
   screenSize = '300x600';
   queries.clear();
   Object.assign(globalThis, {
-    ihtfyAds: { show: (...args) => shown.push(args) },
+    ihtfyAds: {
+      show: (...args) => shown.push(args),
+      adFree: () => new Promise((resolve) => (finishCheck = resolve)),
+    },
   });
 });
 
@@ -225,6 +230,44 @@ test('a buyer or a narrow window gets no rail box', async () => {
   startRail(buyer);
   assert.equal(buyer.hidden, true);
   assert.equal(buyer.boxes.length, 0);
+  added[0].dispatchEvent(new Event('load'));
+  await tick();
+  finishCheck(true);
+  await tick();
+  assert.equal(buyer.hidden, true);
+  assert.equal(buyer.boxes.length, 0);
+});
+
+test('a token the loader finds invalid gets the rail once the check finishes', async () => {
+  const { startRail } = await loadAds();
+  storage.set('ihtfy-ad-free', 'expired');
+  const el = rail();
+  startRail(el);
+  // Pending: collapsed, with the loader fetched to check the token.
+  assert.equal(added.length, 1);
+  added[0].dispatchEvent(new Event('load'));
+  await tick();
+  assert.equal(el.hidden, true);
+  assert.equal(el.boxes.length, 0);
+  finishCheck(false);
+  await tick();
+  assert.equal(el.hidden, false);
+  const [a] = current(el);
+  assert.equal(a.dataset.adSize, '300x600');
+  press();
+  await tick();
+  assert.deepEqual(shown, [[a, 'play/1']]);
+});
+
+test('the rail stays collapsed when the loader cannot check the token', async () => {
+  const { startRail } = await loadAds();
+  storage.set('ihtfy-ad-free', 'token');
+  const el = rail();
+  startRail(el);
+  added[0].dispatchEvent(new Event('error'));
+  await tick();
+  assert.equal(el.hidden, true);
+  assert.equal(el.boxes.length, 0);
 });
 
 test('the breakpoints keep the canvas at 1000 px or more, in a window 700 px tall', async () => {
