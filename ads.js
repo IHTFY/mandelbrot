@@ -77,9 +77,22 @@ const firstInput = new Promise((resolve) => {
 let plays = 0;
 
 // Shows the ad in `rail` while the window fits one, in a new box (and key) for
-// each new size. A buyer gets no rail.
+// each new size. The rail stays collapsed for a buyer, and for a visitor who
+// holds a token until the loader's check finishes and finds it invalid.
 export function startRail(rail) {
-  if (mayBeAdFree()) return;
+  if (!mayBeAdFree()) {
+    placeRail(rail);
+    return;
+  }
+  load()
+    .then(() => window.ihtfyAds.adFree())
+    .then((adFree) => {
+      if (!adFree) placeRail(rail);
+    })
+    .catch(() => {});
+}
+
+function placeRail(rail) {
   const queries = PLAY_AD_SIZES.map((p) => matchMedia(p.query));
   let size;
   let box;
