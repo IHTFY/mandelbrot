@@ -9,6 +9,8 @@
     <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png" />
     <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <meta name="theme-color" content="#000000" />
     <meta property="og:title" content="Mandelbrot" />
     <meta property="og:description" content="Deep-zoom Mandelbrot viewer that runs on the GPU in the browser." />
     <meta property="og:image" content="https://mandelbrot.ihtfy.com/icons/og-image.png" />
@@ -246,5 +248,8 @@
       <div class="hint">Click to zoom in, right-click to zoom out, drag to pan, scroll or pinch to zoom.</div>
       <a class="support" href="https://ihtfy.com/projects/" target="_blank" rel="noopener">More games</a>
     </div>
+    <script>
+      if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+    </script>
   </body>
 </html>
