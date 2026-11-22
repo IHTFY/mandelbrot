@@ -50,11 +50,34 @@
           return;
         }
         root.classList.add('launching');
+        let animations = [];
+        // While the copy shows, a tap or key only skips it: nothing behind it reacts.
+        const swallow = (event) => {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          // A touch's click comes after the copy is gone, aimed at whatever is under the finger.
+          // A mouse press loses its click when the copy goes, so nothing is left to eat there.
+          if (event.type === 'pointerdown' && event.isPrimary && event.button === 0 && event.pointerType !== 'mouse') {
+            const spare = () => removeEventListener('click', eat, true);
+            addEventListener('click', eat, { capture: true, once: true });
+            addEventListener('pointercancel', spare, { once: true });
+            setTimeout(spare, 1000);
+          }
+          animations.forEach((a) => a.finish());
+        };
+        const eat = (event) => {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+        };
         const end = () => {
           clearTimeout(fallback);
+          removeEventListener('pointerdown', swallow, true);
+          removeEventListener('keydown', swallow, true);
           root.classList.remove('launching');
           document.getElementById('launch')?.remove();
         };
+        addEventListener('pointerdown', swallow, true);
+        addEventListener('keydown', swallow, true);
         // The view never stays hidden behind the copy if the page fails to call launchExit.
         const fallback = setTimeout(end, 4000);
         // play(overlay) starts the exit and returns its Web Animations.
@@ -63,7 +86,6 @@
           const overlay = document.getElementById('launch');
           // Too late: the fallback already removed the copy.
           if (!overlay) return;
-          let animations = [];
           if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
             try {
               animations = play(overlay);
@@ -74,7 +96,6 @@
           if (!animations.length) {
             animations = [overlay.animate({ opacity: [1, 0] }, { duration: 200, easing: 'ease-out', fill: 'forwards' })];
           }
-          overlay.addEventListener('pointerdown', () => animations.forEach((a) => a.finish()), { once: true });
           Promise.all(animations.map((a) => a.finished)).then(end, end);
         };
       })();

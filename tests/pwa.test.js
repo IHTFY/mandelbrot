@@ -59,3 +59,11 @@ test('the launch screen copy matches the manifest background and the page calls 
   assert.match(html, /<div id="launch" aria-hidden="true">\s*<img id="launch-icon" src="icons\/icon-maskable-512\.png"/);
   assert.match(read('mandelbrot.js'), /globalThis\.launchExit\?\.\(/);
 });
+
+test('a tap or key during the launch only skips it, and a touch\'s click is eaten', () => {
+  assert.match(html, /addEventListener\('pointerdown', swallow, true\)/);
+  assert.match(html, /addEventListener\('keydown', swallow, true\)/);
+  assert.match(html, /addEventListener\('click', eat, \{ capture: true, once: true \}\)/);
+  assert.match(html, /removeEventListener\('pointerdown', swallow, true\)/);
+  assert.match(html, /removeEventListener\('keydown', swallow, true\)/);
+});
