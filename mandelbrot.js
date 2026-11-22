@@ -816,9 +816,22 @@ function advanceJob() {
     finishedMs = performance.now() - job.started;
     job = null;
     showInfo(finishedMs);
+    playLaunchExit();
     return;
   }
   drawTile();
+}
+
+// Installed-app launch (see index.html): once the first view is drawn, the launch screen's icon
+// zooms toward the set while the screen fades out, then the copy is removed.
+function playLaunchExit() {
+  globalThis.launchExit?.((overlay) => {
+    const icon = overlay.querySelector("#launch-icon");
+    return [
+      icon.animate({ transform: ["scale(1)", "scale(12)"] }, { duration: 900, easing: "cubic-bezier(0.6, 0, 0.9, 0.5)", fill: "forwards" }),
+      overlay.animate({ opacity: [1, 1, 0], offset: [0, 0.4, 1] }, { duration: 900, easing: "ease-out", fill: "forwards" }),
+    ];
+  });
 }
 
 function drawColors() {

@@ -52,3 +52,10 @@ test('the worker is network first and leaves cross-origin requests alone', () =>
   assert.match(sw, /request\.method !== 'GET'/);
   assert.match(sw, /\.catch\(\(\) => caches\.match/);
 });
+
+test('the launch screen copy matches the manifest background and the page calls launchExit', () => {
+  const { background_color } = JSON.parse(read('manifest.webmanifest'));
+  assert.match(html, new RegExp(`\\.launching #launch \\{[^}]*background: ${background_color};`));
+  assert.match(html, /<div id="launch" aria-hidden="true">\s*<img id="launch-icon" src="icons\/icon-maskable-512\.png"/);
+  assert.match(read('mandelbrot.js'), /globalThis\.launchExit\?\.\(/);
+});
