@@ -17,6 +17,68 @@
     <meta property="og:url" content="https://mandelbrot.ihtfy.com/" />
     <meta name="twitter:card" content="summary_large_image" />
 
+    <style>
+      /* Installed-app launch: the first paint copies Chrome's launch screen (manifest background,
+         maskable icon at 128px; Chrome's own name text fades out by itself), then launchExit() zooms the icon into the view. */
+      #launch {
+        display: none;
+      }
+      .launching #launch {
+        position: fixed;
+        inset: 0;
+        z-index: 2147483647;
+        display: grid;
+        place-items: center;
+        background: #000000;
+      }
+      #launch-icon {
+        width: 128px;
+        height: 128px;
+        transform-origin: 68% 50%;
+      }
+    </style>
+    <script>
+      // Plays once per fresh launch of the installed app: never in a browser tab, on reload, or on return.
+      (() => {
+        const root = document.documentElement;
+        try {
+          const nav = performance.getEntriesByType('navigation')[0];
+          const app = matchMedia('(display-mode: standalone), (display-mode: fullscreen)').matches;
+          if (!app || nav?.type !== 'navigate' || sessionStorage.getItem('launched')) return;
+          sessionStorage.setItem('launched', '1');
+        } catch {
+          return;
+        }
+        root.classList.add('launching');
+        const end = () => {
+          clearTimeout(fallback);
+          root.classList.remove('launching');
+          document.getElementById('launch')?.remove();
+        };
+        // The view never stays hidden behind the copy if the page fails to call launchExit.
+        const fallback = setTimeout(end, 4000);
+        // play(overlay) starts the exit and returns its Web Animations.
+        window.launchExit = (play) => {
+          clearTimeout(fallback);
+          const overlay = document.getElementById('launch');
+          // Too late: the fallback already removed the copy.
+          if (!overlay) return;
+          let animations = [];
+          if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
+            try {
+              animations = play(overlay);
+            } catch {
+              animations = [];
+            }
+          }
+          if (!animations.length) {
+            animations = [overlay.animate({ opacity: [1, 0] }, { duration: 200, easing: 'ease-out', fill: 'forwards' })];
+          }
+          overlay.addEventListener('pointerdown', () => animations.forEach((a) => a.finish()), { once: true });
+          Promise.all(animations.map((a) => a.finished)).then(end, end);
+        };
+      })();
+    </script>
     <script defer src="mandelbrot.js"></script>
     <style>
       html,
@@ -179,6 +241,9 @@
     </style>
   </head>
   <body>
+    <div id="launch" aria-hidden="true">
+      <img id="launch-icon" src="icons/icon-maskable-512.png" alt="" />
+    </div>
     <canvas id="canvas"></canvas>
     <!-- The ad on the right edge, on wide windows only: ads.js shows it and adds its box. -->
     <aside id="rail" hidden>
