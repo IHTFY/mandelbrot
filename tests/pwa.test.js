@@ -64,6 +64,7 @@ test('a tap or key during the launch only skips it, and a touch\'s click is eate
   assert.match(html, /addEventListener\('pointerdown', swallow, true\)/);
   assert.match(html, /addEventListener\('keydown', swallow, true\)/);
   assert.match(html, /addEventListener\('click', eat, \{ capture: true, once: true \}\)/);
+  assert.match(html, /addEventListener\('pointerdown', spare, true\)/);
   assert.match(html, /removeEventListener\('pointerdown', swallow, true\)/);
   assert.match(html, /removeEventListener\('keydown', swallow, true\)/);
 });
