@@ -58,9 +58,14 @@
           // A touch's click comes after the copy is gone, aimed at whatever is under the finger.
           // A mouse press loses its click when the copy goes, so nothing is left to eat there.
           if (event.type === 'pointerdown' && event.isPrimary && event.button === 0 && event.pointerType !== 'mouse') {
-            const spare = () => removeEventListener('click', eat, true);
+            const spare = () => {
+              removeEventListener('click', eat, true);
+              removeEventListener('pointerdown', spare, true);
+            };
             addEventListener('click', eat, { capture: true, once: true });
             addEventListener('pointercancel', spare, { once: true });
+            // A drag ends without a click, so the next press must not meet a guard left over.
+            addEventListener('pointerdown', spare, true);
             setTimeout(spare, 1000);
           }
           animations.forEach((a) => a.finish());
